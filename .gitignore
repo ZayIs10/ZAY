@@ -1,0 +1,19 @@
+# Secrets — never commit these
+.env
+google_service_account.json
+
+# Generated output files
+*.jpg
+*.png
+!logo.png
+!example_image.png
+research_output.json
+research_log.txt
+post_generator_log.txt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/

@@ -1,0 +1,135 @@
+{
+  "name": "Web Research - Topic Enrichment",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "node_1_execute_trigger",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://google.serper.dev/news",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.topic }}"
+            },
+            {
+              "name": "num",
+              "value": 5
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "node_2_serper_news",
+      "name": "HTTP - Serper News Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "serper_api_credential",
+          "name": "Serper API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/youtube/v3/search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "part",       "value": "snippet" },
+            { "name": "q",          "value": "={{ $('Execute Workflow Trigger').item.json.topic }}" },
+            { "name": "type",       "value": "video" },
+            { "name": "maxResults", "value": 1 },
+            { "name": "order",      "value": "relevance" },
+            { "name": "key",        "value": "={{ $env.YOUTUBE_API_KEY }}" }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "node_3_youtube_search",
+      "name": "HTTP - YouTube Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Retrieve data from prior nodes\nconst topic = $('Execute Workflow Trigger').item.json.topic || '';\nconst serperData = $('HTTP - Serper News Search').item.json;\nconst youtubeData = $input.item.json;\n\n// --- Process Serper News Results ---\nconst rawArticles = serperData.newsResults || [];\nconst articles = rawArticles.slice(0, 5).map(a => ({\n  title:   a.title   || '',\n  url:     a.link    || '',\n  snippet: a.snippet || '',\n  source:  a.source  || '',\n  date:    a.date    || ''\n}));\n\n// --- Extract Numerical Stats via Regex ---\nconst allSnippets = articles.map(a => a.snippet).join(' ');\nconst statPatterns = [\n  /\\d+(?:\\.\\d+)?%/g,\n  /\\$[\\d,]+(?:\\.\\d+)?(?:\\s?[BMKTbmkt](?:illion|rillion)?)?/g,\n  /\\b\\d{1,3}(?:,\\d{3})+\\s+[a-z]+/gi\n];\nconst rawStats = [];\nfor (const pattern of statPatterns) {\n  const found = allSnippets.match(pattern) || [];\n  rawStats.push(...found);\n}\nconst key_stats = [...new Set(rawStats)].slice(0, 8);\n\n// --- Process YouTube Result ---\nconst ytItems = youtubeData.items || [];\nconst ytFirst = ytItems[0] || null;\nconst youtube = ytFirst ? {\n  title:       ytFirst.snippet?.title        || '',\n  url:         `https://www.youtube.com/watch?v=${ytFirst.id?.videoId || ''}`,\n  description: (ytFirst.snippet?.description || '').substring(0, 200),\n  channel:     ytFirst.snippet?.channelTitle || ''\n} : null;\n\n// --- Build enriched_context (~300 words, for GPT-4o injection) ---\nconst monthYear = new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });\nconst contextLines = [`Recent news on \"${topic}\" (as of ${monthYear}):`, ''];\n\narticles.slice(0, 3).forEach(a => {\n  if (a.snippet) {\n    const words = a.snippet.trim().split(/\\s+/);\n    const truncated = words.slice(0, 80).join(' ') + (words.length > 80 ? '...' : '');\n    contextLines.push(`Source: ${a.source || 'Unknown'} — ${truncated}`);\n    contextLines.push('');\n  }\n});\n\nif (key_stats.length > 0) {\n  contextLines.push('Key statistics found in recent coverage:');\n  key_stats.slice(0, 5).forEach(s => contextLines.push(`- ${s}`));\n  contextLines.push('');\n}\n\nif (youtube && youtube.title) {\n  contextLines.push(`Top YouTube resource: \"${youtube.title}\" by ${youtube.channel}`);\n  contextLines.push(`URL: ${youtube.url}`);\n}\n\nconst enriched_context = contextLines.join('\\n').trim();\n\nreturn { topic, articles, youtube, key_stats, enriched_context };"
+      },
+      "id": "node_4_js_process",
+      "name": "JS - Process Research Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 300]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Serper News Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Serper News Search": {
+      "main": [
+        [
+          {
+            "node": "HTTP - YouTube Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - YouTube Search": {
+      "main": [
+        [
+          {
+            "node": "JS - Process Research Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "instanceId": "gen-z-automation-web-research"
+  }
+}

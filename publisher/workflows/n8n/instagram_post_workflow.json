@@ -1,0 +1,274 @@
+{
+  "name": "Gen Z Automation - Instagram Post Generation",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [Play Tiger
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "event": "rowAdded",
+        "options": {}
+      },
+      "id": "node_1_sheets_trigger",
+      "name": "Google Sheets Trigger",
+      "type": "n8n-nodes-base.googleSheetsTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "YOUR_WEB_RESEARCH_SUBWORKFLOW_ID",
+          "mode": "id"
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        },
+        "fields": {
+          "values": [
+            {
+              "name": "topic",
+              "stringValue": "={{ $json.Topic }}"
+            }
+          ]
+        }
+      },
+      "id": "node_1b_web_research",
+      "name": "Web Research - Topic Enrichment",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a Gen Z social media copywriter for an AI/automation brand. Your style is bold, minimal, and punchy. You write captions that feel like they belong on a cinematic dark-aesthetic Instagram feed. Always output valid JSON with exactly two keys: post_caption and base_image_prompt."
+            },
+            {
+              "role": "user",
+              "content": "=Topic: {{ $('Google Sheets Trigger').item.json.Topic }}\nKey Points: {{ $('Google Sheets Trigger').item.json['Key Points'] }}\nBrand Tone: {{ $('Google Sheets Trigger').item.json['Brand Tone'] }}\n\nREAL-WORLD CONTEXT (use specific stats/facts to make content more credible and professional):\n{{ $json.enriched_context }}\n\nGenerate:\n1. post_caption: A high-impact Instagram caption. Either ultra-short (5 words max) OR a punchy multi-line caption. Use neon green energy in the writing style. Reference real numbers or facts from the context above when they strengthen the message.\n2. base_image_prompt: A cinematic, dark-aesthetic image prompt for DALL-E 3. The image MUST leave a clearly defined dark/black zone on the lower portion for text overlay. Specify this in the prompt.\n\nReturn only valid JSON."
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.8,
+          "response_format": {
+            "type": "json_object"
+          }
+        }
+      },
+      "id": "node_2_openai",
+      "name": "OpenAI - Generate Caption & Image Prompt",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse OpenAI JSON output\nconst openaiOutput = JSON.parse($input.item.json.message.content);\nconst postCaption = openaiOutput.post_caption;\nconst baseImagePrompt = openaiOutput.base_image_prompt;\n\n// Count words in caption\nconst wordCount = postCaption.trim().split(/\\s+/).length;\n\n// Calculate required black space percentage based on word count\nlet blackSpacePercent;\nlet textOverlayY;\nlet fontSize;\n\nif (wordCount <= 5) {\n  blackSpacePercent = 20;\n  textOverlayY = 82;\n  fontSize = 72;\n} else if (wordCount <= 15) {\n  blackSpacePercent = 30;\n  textOverlayY = 72;\n  fontSize = 56;\n} else {\n  blackSpacePercent = 40;\n  textOverlayY = 62;\n  fontSize = 44;\n}\n\nconst imageWidth = 1080;\nconst imageHeight = 1350;\nconst textOverlayYpx = Math.round((textOverlayY / 100) * imageHeight);\nconst textAreaHeightPx = imageHeight - textOverlayYpx - 40;\n\nconst enrichedImagePrompt = `${baseImagePrompt}. The bottom ${blackSpacePercent}% of the image must be a solid deep black or near-black zone with no subject matter, specifically reserved for bold white text overlay. Cinematic dark aesthetic, high contrast, ultra-wide shot.`;\n\nreturn {\n  post_caption: postCaption,\n  base_image_prompt: enrichedImagePrompt,\n  word_count: wordCount,\n  black_space_percent: blackSpacePercent,\n  text_overlay_y: textOverlayYpx,\n  text_area_height: textAreaHeightPx,\n  font_size: fontSize,\n  image_width: imageWidth,\n  image_height: imageHeight,\n  topic: $('Google Sheets Trigger').item.json.Topic,\n  row_number: $('Google Sheets Trigger').item.json.row_number || $('Google Sheets Trigger').item.json.__rowNumber\n};"
+      },
+      "id": "node_3_code",
+      "name": "JS - Layout & Spacing Calculation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 300]
+    },
+    {
+      "parameters": {
+        "resource": "image",
+        "operation": "generate",
+        "prompt": "={{ $json.base_image_prompt }}",
+        "size": "1024x1792",
+        "quality": "hd",
+        "style": "vivid",
+        "response_format": "url"
+      },
+      "id": "node_4_dalle",
+      "name": "DALL-E 3 - Generate Base Image",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [1200, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "apiKey",
+        "resource": "image",
+        "operation": "create",
+        "templateId": "YOUR_BANNERBEAR_TEMPLATE_ID",
+        "modifications": {
+          "values": [
+            {
+              "uid": "background_image",
+              "imageUrl": "={{ $json.data[0].url }}"
+            },
+            {
+              "uid": "caption_text",
+              "text": "={{ $('JS - Layout & Spacing Calculation').item.json.post_caption }}",
+              "color": "#FFFFFF",
+              "fontSize": "={{ $('JS - Layout & Spacing Calculation').item.json.font_size }}"
+            }
+          ]
+        },
+        "options": {
+          "synchronous": true
+        }
+      },
+      "id": "node_5_bannerbear",
+      "name": "Bannerbear - Format & Overlay Text",
+      "type": "n8n-nodes-base.bannerbear",
+      "typeVersion": 1,
+      "position": [1440, 300]
+    },
+    {
+      "parameters": {
+        "resource": "mediaContainer",
+        "operation": "create",
+        "imageUrl": "={{ $json.image_url }}",
+        "caption": "={{ $('JS - Layout & Spacing Calculation').item.json.post_caption }}\n\n#GenZAutomation #AItools #Automation #GenZ #NoCode #FutureOfWork",
+        "additionalFields": {}
+      },
+      "id": "node_6_instagram",
+      "name": "Instagram - Publish Post",
+      "type": "n8n-nodes-base.instagram",
+      "typeVersion": 1,
+      "position": [1680, 300]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "row_number": "={{ $('JS - Layout & Spacing Calculation').item.json.row_number }}",
+            "Status": "Published",
+            "Published Date": "={{ new Date().toISOString().split('T')[0] }}",
+            "Post URL": "={{ $json.permalink || 'N/A' }}",
+            "Instagram Post ID": "={{ $json.id || 'N/A' }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "node_7_sheets_update",
+      "name": "Google Sheets - Update Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1920, 300]
+    }
+  ],
+  "connections": {
+    "Google Sheets Trigger": {
+      "main": [
+        [
+          {
+            "node": "Web Research - Topic Enrichment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Web Research - Topic Enrichment": {
+      "main": [
+        [
+          {
+            "node": "OpenAI - Generate Caption & Image Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI - Generate Caption & Image Prompt": {
+      "main": [
+        [
+          {
+            "node": "JS - Layout & Spacing Calculation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JS - Layout & Spacing Calculation": {
+      "main": [
+        [
+          {
+            "node": "DALL-E 3 - Generate Base Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DALL-E 3 - Generate Base Image": {
+      "main": [
+        [
+          {
+            "node": "Bannerbear - Format & Overlay Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bannerbear - Format & Overlay Text": {
+      "main": [
+        [
+          {
+            "node": "Instagram - Publish Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Instagram - Publish Post": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - Update Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "instanceId": "gen-z-automation-instagram"
+  }
+}

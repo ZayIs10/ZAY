@@ -1,0 +1,94 @@
+name: Gen Z Capital — Daily Post Pipeline
+
+# Runs 3x per day (UTC+8 / Malaysia-Singapore time):
+#   08:00 AM local = 00:00 UTC  → research + publish
+#   01:00 PM local = 05:00 UTC  → research + publish
+#   06:00 PM local = 10:00 UTC  → research + publish
+#
+# To change times: edit the cron lines below (uses UTC)
+# Converter: https://www.worldtimebuddy.com
+
+on:
+  schedule:
+    - cron: '0 0 * * *'    # 8:00 AM UTC+8
+    - cron: '0 5 * * *'    # 1:00 PM UTC+8
+    - cron: '0 10 * * *'   # 6:00 PM UTC+8
+  workflow_dispatch:        # allow manual trigger from GitHub UI
+
+jobs:
+  research-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      # -----------------------------------------------------------------------
+      # 1. Get the code
+      # -----------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # 2. Python setup
+      # -----------------------------------------------------------------------
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # -----------------------------------------------------------------------
+      # 3. Rebuild secret files from GitHub Secrets
+      #    (these files are in .gitignore — never committed to the repo)
+      # -----------------------------------------------------------------------
+      - name: Create .env file
+        run: |
+          cat > .env << 'ENVEOF'
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          INSTAGRAM_ACCESS_TOKEN=${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
+          INSTAGRAM_IG_USER_ID=${{ secrets.INSTAGRAM_IG_USER_ID }}
+          GOOGLE_SHEET_ID=${{ secrets.GOOGLE_SHEET_ID }}
+          IMGBB_API_KEY=${{ secrets.IMGBB_API_KEY }}
+          YOUTUBE_API_KEY=${{ secrets.YOUTUBE_API_KEY }}
+          SERPER_API_KEY=${{ secrets.SERPER_API_KEY }}
+          APIFY_API_TOKEN=${{ secrets.APIFY_API_TOKEN }}
+          ENVEOF
+
+      - name: Create google_service_account.json
+        run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > google_service_account.json
+
+      # -----------------------------------------------------------------------
+      # 4. Research phase — find 1 fresh topic, write to Google Sheets
+      # -----------------------------------------------------------------------
+      - name: Run research (1 topic)
+        run: |
+          cd research
+          python research.py --count 1
+        continue-on-error: true   # if research fails, still try to publish
+
+      # -----------------------------------------------------------------------
+      # 5. Wait 2 minutes for Google Sheets to sync
+      # -----------------------------------------------------------------------
+      - name: Wait for Sheets sync
+        run: sleep 120
+
+      # -----------------------------------------------------------------------
+      # 6. Publisher phase — generate image + post to Instagram
+      # -----------------------------------------------------------------------
+      - name: Run publisher
+        run: |
+          cd publisher
+          python post_generator.py
+
+      # -----------------------------------------------------------------------
+      # 7. Upload logs as artifacts (downloadable from GitHub for debugging)
+      # -----------------------------------------------------------------------
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-logs-${{ github.run_id }}
+          path: logs/
+          retention-days: 7

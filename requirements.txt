@@ -1,0 +1,11 @@
+requests==2.31.0
+openai==1.30.0
+gspread==6.1.2
+google-auth==2.29.0
+google-auth-oauthlib==1.2.0
+python-dotenv==1.0.1
+Pillow==10.3.0
+schedule==1.2.1
+feedparser==6.0.12
+pytrends==4.9.2
+duckduckgo-search==8.1.1

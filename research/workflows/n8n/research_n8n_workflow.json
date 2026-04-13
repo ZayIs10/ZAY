@@ -1,0 +1,201 @@
+{
+  "name": "Gen Z Research Pipeline - Weekly Run",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * 0"
+            }
+          ]
+        }
+      },
+      "id": "node_r1_schedule",
+      "name": "Schedule - Weekly Sunday 6AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "command": "cd \"C:/Users/Marc/Desktop/Gen Z autamation\" && python research.py"
+      },
+      "id": "node_r2_execute",
+      "name": "Execute - Run Research Script",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.exitCode }}",
+              "operation": "equal",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "node_r3_if_success",
+      "name": "IF - Script Succeeded?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const stdout = $input.item.json.stdout || '';\nconst match = stdout.match(/SUCCESS: (\\d+) topics written/);\nconst rowsWritten = match ? parseInt(match[1]) : 0;\nreturn {\n  success: true,\n  rows_written: rowsWritten,\n  stdout: stdout,\n  run_timestamp: new Date().toISOString()\n};"
+      },
+      "id": "node_r4_parse_output",
+      "name": "JS - Parse Script Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 180]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "ResearchLog",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Run Date": "={{ $json.run_timestamp }}",
+            "Rows Written": "={{ $json.rows_written }}",
+            "Status": "Success",
+            "Notes": "={{ $json.stdout }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "node_r5_log_success",
+      "name": "Google Sheets - Log Run Success",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1200, 180]
+    },
+    {
+      "parameters": {
+        "jsCode": "const exitCode = $input.item.json.exitCode;\nconst stderr = $input.item.json.stderr || 'No error output';\nconst stdout = $input.item.json.stdout || '';\nconst errorMessages = {\n  1: 'GPT-4o topic generation failed validation',\n  2: 'Apify API error - Instagram scraping failed',\n  3: 'Google Sheets write failed'\n};\nconst errorReason = errorMessages[exitCode] || `Unknown error (exit code ${exitCode})`;\nreturn {\n  error_reason: errorReason,\n  exit_code: exitCode,\n  stderr: stderr,\n  stdout: stdout,\n  run_timestamp: new Date().toISOString(),\n  message: `Research pipeline failed: ${errorReason}. Check: C:/Users/Marc/Desktop/Gen Z autamation/research_log.txt`\n};"
+      },
+      "id": "node_r6_error_format",
+      "name": "JS - Format Error Details",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 420]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "ResearchLog",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Run Date": "={{ $json.run_timestamp }}",
+            "Rows Written": "=0",
+            "Status": "Failed",
+            "Notes": "={{ $json.message }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "node_r7_log_error",
+      "name": "Google Sheets - Log Run Error",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1200, 420]
+    }
+  ],
+  "connections": {
+    "Schedule - Weekly Sunday 6AM": {
+      "main": [
+        [
+          {
+            "node": "Execute - Run Research Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute - Run Research Script": {
+      "main": [
+        [
+          {
+            "node": "IF - Script Succeeded?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Script Succeeded?": {
+      "main": [
+        [
+          {
+            "node": "JS - Parse Script Output",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "JS - Format Error Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JS - Parse Script Output": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - Log Run Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JS - Format Error Details": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - Log Run Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "instanceId": "gen-z-research-pipeline"
+  }
+}
