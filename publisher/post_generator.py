@@ -171,8 +171,9 @@ class SheetsReader:
 
     def __init__(self, config: dict):
         self.cfg = config["google_sheets"]
-        creds_path = os.path.join(
-            config["output_dir"], self.cfg["credentials_file"])
+        # Compute credentials path relative to this file (works on any OS)
+        creds_path = os.path.abspath(os.path.join(
+            os.path.dirname(__file__), "..", self.cfg["credentials_file"]))
         creds = Credentials.from_service_account_file(
             creds_path, scopes=self.SCOPES)
         self.gc = gspread.authorize(creds)
