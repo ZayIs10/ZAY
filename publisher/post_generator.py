@@ -123,6 +123,11 @@ def load_config(config_path: str = None) -> dict:
     with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
 
+    # Always resolve output_dir relative to this file's location (cross-platform)
+    # Overrides any hardcoded Windows path in the config
+    config["output_dir"] = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), ".."))
+
     # Override config with environment variables (keeps secrets out of JSON)
     if os.getenv("OPENAI_API_KEY"):
         config["openai"]["api_key"] = os.getenv("OPENAI_API_KEY")
