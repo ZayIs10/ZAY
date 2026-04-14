@@ -63,7 +63,10 @@ jobs:
           printf "APIFY_API_TOKEN=%s\n" "$APIFY_API_TOKEN" >> .env
 
       - name: Create google_service_account.json
-        run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > google_service_account.json
+        run: |
+          echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > google_service_account.json
+          echo "Created at: $(pwd)/google_service_account.json"
+          ls -la google_service_account.json
 
       # -----------------------------------------------------------------------
       # 4. Research phase — find 1 fresh topic, write to Google Sheets
