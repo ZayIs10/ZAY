@@ -55,25 +55,60 @@ TOPIC_SUBJECT_MAP = [
 ]
 
 
-def build_dalle_prompt(topic: str, key_points: str, config: dict) -> str:
-    """Pick the most relevant cinematic subject and build a full DALL-E prompt."""
+_DALLE_PROMPT_SYSTEM = (
+    "You are a cinematic art director for Gen Z Capital, a dark luxury wealth/AI/automation brand. "
+    "Your job: given a post topic and key points, write ONE specific DALL-E 3 image prompt. "
+    "The image must be PHOTO-REALISTIC and cinematic — NOT a chart, NOT a generic office. "
+    "Rules:\n"
+    "- Scene must be SPECIFIC to the topic. Visualize the concept creatively and uniquely.\n"
+    "- Dark, moody, cinematic. Single dramatic light source. Deep shadows.\n"
+    "- No people's faces visible (silhouettes or backs only).\n"
+    "- No text, no watermarks, no UI elements, no phone screens with visible apps.\n"
+    "- Shot on RED Komodo 6K, anamorphic lens, f/1.8, ISO 3200 film grain, Kodachrome grade.\n"
+    "- Output: ONE paragraph, max 60 words. No intro, no explanation. Just the prompt."
+)
+
+
+def build_dalle_prompt(topic: str, key_points: str, config: dict,
+                       client=None, enriched_context: str = "") -> str:
+    """Generate a topic-specific cinematic DALL-E prompt using GPT-4o.
+    Falls back to static keyword map if client is not available."""
+    if client is not None:
+        try:
+            user_msg = (
+                f"Topic: {topic}\n"
+                f"Key Points: {key_points}\n"
+                f"Context: {enriched_context[:300] if enriched_context else 'none'}\n\n"
+                "Write the DALL-E 3 image prompt."
+            )
+            resp = client.chat.completions.create(
+                model=config.get("openai", {}).get("model", "gpt-4o"),
+                temperature=0.9,
+                max_tokens=120,
+                messages=[
+                    {"role": "system", "content": _DALLE_PROMPT_SYSTEM},
+                    {"role": "user", "content": user_msg},
+                ],
+            )
+            prompt = resp.choices[0].message.content.strip()
+            logging.info(f"AI image prompt: {prompt[:100]}...")
+            return prompt
+        except Exception as e:
+            logging.warning(f"AI prompt generation failed ({e}), using static fallback.")
+
+    # Static fallback
     subjects = config.get("wealth_image_subjects", {})
     modifiers = config.get("dalle_prompt_modifiers", {})
-
     combined = (topic + " " + key_points).lower()
-
-    subject_key = "founder_office"  # default
+    subject_key = "founder_office"
     for keywords, key in TOPIC_SUBJECT_MAP:
         if any(kw in combined for kw in keywords):
             subject_key = key
             break
-
-    subject = subjects.get(
-        subject_key, "A cinematic dark luxury scene, dramatic lighting")
+    subject = subjects.get(subject_key, "A cinematic dark luxury scene, dramatic lighting")
     style = modifiers.get("style", "cinematic, dramatic lighting")
     lighting = modifiers.get("lighting", "single-source dramatic lighting")
     forbidden = modifiers.get("forbidden", "no text, no watermarks")
-
     return f"{subject}. {style}. {lighting}. {forbidden}."
 
 
@@ -888,7 +923,9 @@ def main():
 
     # Step 3: Build DALL-E prompt + generate image
     key_points = row.get("Key Points / Slide Content", "") or row.get("Key Points", "")
-    img_prompt = build_dalle_prompt(row.get("Topic", ""), key_points, config)
+    enriched_context = row.get("Enriched Context", "")
+    img_prompt = build_dalle_prompt(row.get("Topic", ""), key_points, config,
+                                    client=client, enriched_context=enriched_context)
     logging.info(f"DALL-E prompt: {img_prompt[:120]}...")
     img_gen = ImageGenerator(config, client, usage_guard=usage_guard)
     img_bytes = img_gen.generate(img_prompt)

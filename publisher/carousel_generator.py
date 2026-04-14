@@ -143,9 +143,11 @@ class CarouselBuilder:
             self.config, self.client, usage_guard=self.usage_guard)
         slides = content_gen.generate_slides(row)
 
-        # Step 2: Build DALL-E prompt base (shared subject for cover, varied for others)
+        # Step 2: Build DALL-E prompt base using AI (topic-specific cinematic scene)
+        enriched_context = row.get("Enriched Context", "")
         base_subject_prompt = build_dalle_prompt(
-            topic, key_points, self.config)
+            topic, key_points, self.config,
+            client=self.client, enriched_context=enriched_context)
 
         # Step 3: Generate image + overlay for each slide
         img_gen = ImageGenerator(
