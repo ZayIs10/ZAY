@@ -69,26 +69,65 @@ jobs:
           ls -la google_service_account.json
 
       # -----------------------------------------------------------------------
-      # 4. Research phase — find 1 fresh topic, write to Google Sheets
+      # 4. Verify secrets are present (safe check — never prints values)
+      # -----------------------------------------------------------------------
+      - name: Verify required secrets are set
+        run: |
+          echo "=== Secret presence check (values are hidden) ==="
+          [ -n "$OPENAI_API_KEY" ]            && echo "OPENAI_API_KEY        ✓" || echo "OPENAI_API_KEY        ✗ MISSING"
+          [ -n "$INSTAGRAM_ACCESS_TOKEN" ]     && echo "INSTAGRAM_ACCESS_TOKEN ✓" || echo "INSTAGRAM_ACCESS_TOKEN ✗ MISSING"
+          [ -n "$INSTAGRAM_IG_USER_ID" ]       && echo "INSTAGRAM_IG_USER_ID  ✓" || echo "INSTAGRAM_IG_USER_ID  ✗ MISSING"
+          [ -n "$GOOGLE_SHEET_ID" ]            && echo "GOOGLE_SHEET_ID       ✓" || echo "GOOGLE_SHEET_ID       ✗ MISSING"
+          [ -n "$IMGBB_API_KEY" ]              && echo "IMGBB_API_KEY         ✓" || echo "IMGBB_API_KEY         ✗ MISSING"
+          python3 -c "
+          import json, sys
+          try:
+              d = json.load(open('google_service_account.json'))
+              print('google_service_account.json ✓ (type:', d.get('type','?'), ')')
+          except Exception as e:
+              print('google_service_account.json ✗', e)
+              sys.exit(1)
+          "
+
+      # -----------------------------------------------------------------------
+      # 5. Research phase — find 1 fresh topic, write to Google Sheets
       # -----------------------------------------------------------------------
       - name: Run research (1 topic)
-        run: cd research && python research.py --count 1
+        id: research
+        run: |
+          mkdir -p logs
+          cd research
+          python research.py --count 1 2>&1 | tee ../logs/research_run.log
+          echo "exit_code=$?" >> $GITHUB_OUTPUT
         continue-on-error: true
 
+      - name: Research result summary
+        run: |
+          echo "=== Research output ==="
+          cat logs/research_run.log 2>/dev/null || echo "(no log)"
+          if grep -q "SUCCESS" logs/research_run.log 2>/dev/null; then
+            echo "Research: PASSED"
+          else
+            echo "Research: FAILED or no topics written — check log above"
+          fi
+
       # -----------------------------------------------------------------------
-      # 5. Wait 2 minutes for Google Sheets to sync
+      # 6. Wait 30 seconds for Google Sheets to sync (reduced from 120s)
       # -----------------------------------------------------------------------
       - name: Wait for Sheets sync
-        run: sleep 120
+        run: sleep 30
 
       # -----------------------------------------------------------------------
-      # 6. Publisher phase — generate image + post to Instagram
+      # 7. Publisher phase — generate image + post to Instagram
       # -----------------------------------------------------------------------
       - name: Run publisher
-        run: cd publisher && python post_generator.py
+        run: |
+          mkdir -p logs
+          cd publisher
+          python post_generator.py 2>&1 | tee ../logs/publisher_run.log
 
       # -----------------------------------------------------------------------
-      # 7. Upload logs as artifacts (downloadable from GitHub for debugging)
+      # 8. Upload logs as artifacts (downloadable from GitHub for debugging)
       # -----------------------------------------------------------------------
       - name: Upload logs
         if: always()
@@ -96,4 +135,4 @@ jobs:
         with:
           name: pipeline-logs-${{ github.run_id }}
           path: logs/
-          retention-days: 7
+          retention-days: 14
