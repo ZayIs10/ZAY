@@ -621,6 +621,10 @@ class GoogleSheetsWriter:
 
         self.ensure_columns_exist(ws, self.cfg.get("columns", []))
 
+        # Read the ACTUAL header row so we write each value to the right column
+        headers = ws.row_values(1)
+        logging.info(f"Sheet headers: {headers[:10]}...")
+
         existing = ws.col_values(1)[1:]
         rows, skipped = [], 0
 
@@ -630,20 +634,32 @@ class GoogleSheetsWriter:
                 skipped += 1
                 continue
             post_type = t.get("post_type", "single")
-            rows.append([
-                t["topic"],
-                t.get("key_points", ""),
-                self.brand_tone,
-                t.get("enriched_context", ""),
-                t.get("youtube_url", ""),
-                "Ready",
-                "",
-                "",
-                "",
-                "",
-                post_type,
-                "",
-            ])
+
+            # Build a dict of column_name -> value
+            data = {
+                "Topic":            t["topic"],
+                "Key Points":       t.get("key_points", ""),
+                "Brand Tone":       self.brand_tone,
+                "Enriched Context": t.get("enriched_context", ""),
+                "YouTube URL":      t.get("youtube_url", ""),
+                "Status":           "Ready",
+                "Post Type":        post_type,
+                "Published Date":   "",
+                "Post URL":         "",
+                "Instagram Post ID": "",
+                "Image":            "",
+                "Slide Content":    "",
+            }
+
+            # Map to positional row aligned to actual sheet headers
+            row = [""] * len(headers)
+            for col_name, val in data.items():
+                if col_name in headers:
+                    row[headers.index(col_name)] = val
+                else:
+                    logging.warning(f"  Column '{col_name}' not found in sheet headers — skipping")
+
+            rows.append(row)
             existing.append(t["topic"])
 
         if not rows:
