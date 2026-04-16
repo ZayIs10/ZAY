@@ -359,36 +359,36 @@ class TopicGenerator:
 
         if post_type == "carousel":
             system_msg = (
-                f"You are a Gen Z content strategist. Output a JSON array of exactly {n} objects."
+                f"You are a Gen Z content strategist. Always respond with a JSON object containing a 'topics' key whose value is an array of exactly {n} objects."
                 + strict_note
             )
             user_msg = (
                 f"Based on this analysis:\n\n{summary}\n\n"
                 f"Brand tone: {self.brand_tone}\n\n"
                 f"Generate exactly {n} Instagram CAROUSEL topic ideas for wealth/AI/finance.\n\n"
-                f"Return a JSON array of {n} objects, each with keys:\n"
+                f"Return a JSON object like: {{\"topics\": [...]}}\n"
+                f"Each object in the array must have keys:\n"
                 f"- topic (max 10 words)\n"
                 f"- key_points (EXACTLY 5 distinct sub-points, comma-separated, for 5 content slides)\n"
                 f"- suggested_stat (one powerful statistic string with a number, e.g. '47% of Gen Z...')\n"
                 f"- cta_pattern_used\n"
-                f"- hook_structure_used\n\n"
-                f"Return ONLY the JSON array."
+                f"- hook_structure_used\n"
             )
         else:
             system_msg = (
-                f"You are a Gen Z content strategist. Output a JSON array of exactly {n} objects."
+                f"You are a Gen Z content strategist. Always respond with a JSON object containing a 'topics' key whose value is an array of exactly {n} objects."
                 + strict_note
             )
             user_msg = (
                 f"Based on this analysis:\n\n{summary}\n\n"
                 f"Brand tone: {self.brand_tone}\n\n"
                 f"Generate exactly {n} Instagram single-image post topic ideas.\n\n"
-                f"Return a JSON array of {n} objects, each with keys:\n"
+                f"Return a JSON object like: {{\"topics\": [...]}}\n"
+                f"Each object in the array must have keys:\n"
                 f"- topic (max 10 words)\n"
                 f"- key_points (3-4 points, comma-separated)\n"
                 f"- cta_pattern_used\n"
-                f"- hook_structure_used\n\n"
-                f"Return ONLY the JSON array."
+                f"- hook_structure_used\n"
             )
 
         try:
@@ -401,19 +401,30 @@ class TopicGenerator:
                     {"role": "user",   "content": user_msg},
                 ],
             )
-            parsed = json.loads(resp.choices[0].message.content)
+            raw = resp.choices[0].message.content
+            parsed = json.loads(raw)
             if isinstance(parsed, dict):
                 for v in parsed.values():
                     if isinstance(v, list):
                         parsed = v
                         break
             if not isinstance(parsed, list):
+                logging.warning(f"GPT response was not a list. Keys: {list(parsed.keys()) if isinstance(parsed, dict) else type(parsed)}")
                 return None
-            required = {"topic", "key_points", "cta_pattern_used", "hook_structure_used"}
-            valid = [t for t in parsed if required.issubset(t.keys())]
-            for t in valid:
+            # Only require "topic" — fill in missing keys with defaults
+            valid = []
+            for t in parsed:
+                if not isinstance(t, dict) or "topic" not in t:
+                    continue
+                t.setdefault("key_points", "")
+                t.setdefault("cta_pattern_used", "curiosity")
+                t.setdefault("hook_structure_used", "stat_hook")
+                t.setdefault("suggested_stat", "")
                 t["post_type"] = post_type
-            return valid[:n] if len(valid) >= n else None
+                valid.append(t)
+            logging.info(f"GPT returned {len(parsed)} items, {len(valid)} valid for post_type={post_type}")
+            # Return what we have even if fewer than requested
+            return valid[:n] if valid else None
         except Exception as e:
             logging.warning(f"GPT-4o call error: {e}")
             return None
