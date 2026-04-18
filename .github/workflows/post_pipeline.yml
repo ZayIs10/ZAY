@@ -91,6 +91,7 @@ jobs:
 
       # -----------------------------------------------------------------------
       # 5. Research phase — find 1 fresh topic, write to Google Sheets
+      #    NOTE: no continue-on-error — a real failure shows as RED in GitHub
       # -----------------------------------------------------------------------
       - name: Run research (1 topic)
         id: research
@@ -98,21 +99,26 @@ jobs:
           mkdir -p logs
           cd research
           python research.py --count 1 2>&1 | tee ../logs/research_run.log
-          echo "exit_code=$?" >> $GITHUB_OUTPUT
-        continue-on-error: true
+          RESEARCH_EXIT=${PIPESTATUS[0]}
 
-      - name: Research result summary
-        run: |
-          echo "=== Research output ==="
-          cat logs/research_run.log 2>/dev/null || echo "(no log)"
-          if grep -q "SUCCESS" logs/research_run.log 2>/dev/null; then
-            echo "Research: PASSED"
+          # Count how many rows were actually written
+          ROWS_WRITTEN=$(grep -oP "Wrote \K[0-9]+" ../logs/research_run.log 2>/dev/null || echo "0")
+          echo "rows_written=$ROWS_WRITTEN" >> $GITHUB_OUTPUT
+
+          echo ""
+          echo "========================================="
+          if [ "$ROWS_WRITTEN" -gt "0" ]; then
+            echo "✅ RESEARCH SUCCESS — wrote $ROWS_WRITTEN topic(s) to Google Sheets"
           else
-            echo "Research: FAILED or no topics written — check log above"
+            echo "❌ RESEARCH FAILED — 0 topics written to Google Sheets"
+            echo "Most likely cause: OpenAI quota exhausted (429) or API key issue."
+            echo "Check: https://platform.openai.com/account/billing"
+            exit 1
           fi
+          echo "========================================="
 
       # -----------------------------------------------------------------------
-      # 6. Wait 30 seconds for Google Sheets to sync (reduced from 120s)
+      # 6. Wait 30 seconds for Google Sheets to sync
       # -----------------------------------------------------------------------
       - name: Wait for Sheets sync
         run: sleep 30
@@ -125,6 +131,22 @@ jobs:
           mkdir -p logs
           cd publisher
           python post_generator.py 2>&1 | tee ../logs/publisher_run.log
+          PUBLISHER_EXIT=${PIPESTATUS[0]}
+
+          echo ""
+          echo "========================================="
+          if grep -q "Post published" ../logs/publisher_run.log 2>/dev/null; then
+            POST_URL=$(grep -oP "Post URL: \K\S+" ../logs/publisher_run.log | tail -1)
+            echo "✅ PUBLISHER SUCCESS — post live: $POST_URL"
+          elif grep -q "No topics with Status='Ready'" ../logs/publisher_run.log 2>/dev/null; then
+            echo "⚠️  PUBLISHER SKIPPED — no Ready topics found in Google Sheets"
+            echo "Research may have failed or sheet is empty."
+          else
+            echo "❌ PUBLISHER FAILED — check logs above"
+          fi
+          echo "========================================="
+
+          exit $PUBLISHER_EXIT
 
       # -----------------------------------------------------------------------
       # 8. Upload logs as artifacts (downloadable from GitHub for debugging)

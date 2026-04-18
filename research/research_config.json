@@ -57,7 +57,7 @@
   },
   "openai": {
     "api_key": "",
-    "model": "gpt-4o",
+    "model": "gpt-4o-mini",
     "temperature": 0.85,
     "dalle_model": "dall-e-3",
     "dalle_size": "1024x1024",
@@ -153,6 +153,6 @@
   "schedule": {
     "post_times": ["08:00", "13:00", "18:00"]
   },
-  "output_dir": "C:/Users/Marc/Desktop/Gen Z autamation",
+  "output_dir": "",
   "log_file": "research_log.txt"
 }
