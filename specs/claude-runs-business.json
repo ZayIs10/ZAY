@@ -1,0 +1,32 @@
+{
+  "slug": "claude-runs-business",
+  "template": "five_beat",
+
+  "hook_line_1": "ANTHROPIC JUST",
+  "hook_line_2": "LAUNCHED CLAUDE",
+  "hook_line_3": "FOR SMALL BUSINESS",
+
+  "problem_a": "5 APPS A MONTH",
+  "problem_b": "QUICKBOOKS, PAYPAL",
+  "problem_c": "HUBSPOT, CANVA, DOCUSIGN",
+
+  "insight_1": "NOW IT'S ONE CHAT",
+  "insight_2": "INVOICES, PAYMENTS, EMAILS",
+  "insight_3": "CLAUDE ASKS BEFORE SENDING",
+
+  "proof_number": "15 + 15",
+  "proof_label": "WORKFLOWS + SKILLS",
+  "proof_sublabel": "LIVE SINCE MAY 13, 2026",
+
+  "cta_save": "WOULD YOU TRUST IT?",
+  "cta_follow": "FOLLOW @GENZ_CAPITALBUSINESS",
+
+  "voiceover_src": "assets/audio/claude-runs-business_voiceover.mp3",
+
+  "pexels_queries": [
+    "anthropic claude small business",
+    "quickbooks paypal hubspot canva docusign logos",
+    "claude ai invoice email chat",
+    "claude ai dashboard quickbooks"
+  ]
+}

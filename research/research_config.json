@@ -1,41 +1,44 @@
 {
-  "version": "3.0",
+  "version": "4.0",
+  "niche": "AI tools & how-to — practical, teach-you-something content for a faceless YouTube Shorts channel. Every topic must teach the viewer one concrete, usable thing: how to use an AI tool, or the best AI tools for a specific task.",
+  "platform": "youtube",
   "free_sources": {
     "reddit": {
       "subreddits": [
-        "wallstreetbets",
-        "personalfinance",
-        "entrepreneur",
-        "investing",
-        "financialindependence",
-        "AItools",
-        "passive_income"
+        "ChatGPT",
+        "OpenAI",
+        "artificial",
+        "ArtificialInteligence",
+        "aitools",
+        "productivity",
+        "automation",
+        "SideProject"
       ],
       "posts_per_subreddit": 25,
       "user_agent": "GenZCapitalResearch/1.0"
     },
     "hackernews": {
       "keywords": [
-        "AI wealth",
-        "passive income",
-        "financial independence",
-        "startup automation",
-        "investing 2026"
+        "AI tool",
+        "ChatGPT",
+        "AI agent",
+        "AI workflow",
+        "automate with AI",
+        "Claude AI"
       ],
       "hits_per_keyword": 10
     },
     "rss_feeds": [
-      "https://feeds.content.dowjones.io/public/rss/mw-topstories",
-      "https://www.cnbc.com/id/100727362/device/rss/rss.html",
-      "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
-      "https://www.entrepreneur.com/latest.rss"
+      "https://techcrunch.com/category/artificial-intelligence/feed/",
+      "https://venturebeat.com/category/ai/feed/",
+      "https://www.theverge.com/rss/index.xml"
     ],
     "google_trends": {
       "keywords": [
-        "AI income",
-        "passive income 2026",
-        "Gen Z investing",
-        "financial freedom"
+        "AI tools",
+        "ChatGPT tips",
+        "best AI app",
+        "AI automation"
       ],
       "timeframe": "now 7-d",
       "geo": "US"
@@ -43,10 +46,10 @@
     "newsapi": {
       "api_key": "",
       "queries": [
-        "Gen Z finance",
-        "AI passive income",
-        "financial independence 2026",
-        "wealth automation"
+        "new AI tool",
+        "AI productivity",
+        "ChatGPT feature",
+        "AI agent launch"
       ],
       "page_size": 5
     },
@@ -63,21 +66,19 @@
     "dalle_size": "1024x1024",
     "dalle_quality": "hd"
   },
-  "wealth_image_subjects": {
-    "ai_tech": "A lone developer surrounded by multiple curved ultrawide monitors displaying code and dashboards in a pitch-black room, neon blue screen glow, cinematic",
-    "server_room": "A server corridor with endless blue-lit GPU racks receding to a vanishing point, low mist on the floor, cinematic industrial",
-    "trading": "Wall Street trading floor at peak hours, dozens of Bloomberg terminals, motion blur on traders moving fast, overhead dramatic lighting",
-    "trading_screens": "Close-up of three curved trading monitors showing upward-trending charts in a dark room, single overhead spotlight, hands on keyboard",
-    "money_wealth": "A single stack of crisp $100 bills under a tight spotlight on a matte black surface, deep shadows, ultra macro lens",
-    "portfolio": "A hand holding a phone displaying a portfolio chart spiking upward, luxury apartment window behind with city lights defocused at f/1.4",
-    "founder_office": "A solitary young founder at a glass desk on the 60th floor of a Manhattan skyscraper at 3am, entire dark city below, single desk lamp",
-    "luxury_car": "A matte black Lamborghini Urus parked on a rain-slicked empty street under amber sodium lights, puddle reflections, fog in background",
-    "private_jet": "Interior of a private jet looking forward over cream leather seats toward oval windows showing golden hour clouds, cinematic warm grade",
-    "yacht": "Aerial drone shot of a superyacht cutting through deep blue Caribbean water at sunset, long wake trail, no people visible"
+  "image_subjects": {
+    "ai_workspace": "A clean modern desk with a single laptop displaying a glowing AI chat interface, soft neon-green rim light, pitch-black room, cinematic shallow depth of field",
+    "robot_hand": "A sleek robotic hand typing on a backlit mechanical keyboard, shallow depth of field, dark cinematic, single overhead spotlight",
+    "neural_net": "Abstract glowing neural-network nodes suspended in deep black space, neon green and electric blue connections, cinematic 3D render",
+    "automation_flow": "A flowchart of connected glowing nodes floating above a dark desk, neon-green data flowing between them, cinematic industrial",
+    "phone_ai": "A hand holding a phone showing an AI assistant mid-response, dark defocused cafe background at f/1.4, cinematic warm grade",
+    "code_screen": "Close-up of a curved monitor showing an AI prompt and its response, neon screen glow lighting a dark room, hands on keyboard",
+    "future_tech": "A young person wearing AR glasses with holographic AI panels floating around them, dark cinematic, neon accents",
+    "speed_work": "Long motion-blur light trails wrapping around a laptop on a dark desk, suggesting fast automated work, cinematic"
   },
   "dalle_prompt_modifiers": {
     "style": "shot on RED Komodo 6K, anamorphic lens, f/1.8 shallow depth of field, ISO 3200 film grain, Kodachrome cinematic color grade, 4K resolution",
-    "lighting": "single-source dramatic lighting, deep shadows, strong chiaroscuro contrast, no fill light",
+    "lighting": "single-source dramatic lighting, deep shadows, strong chiaroscuro contrast, neon-green accent light",
     "forbidden": "absolutely no text, no watermarks, no logos, no UI elements, no solid black rectangles, no blank zones"
   },
   "google_sheets": {
@@ -100,46 +101,30 @@
       "Slide Content"
     ]
   },
+  "youtube": {
+    "api_key": "",
+    "search_queries": [
+      "best AI tools 2026",
+      "how to use AI tutorial"
+    ]
+  },
   "instagram": {
     "access_token": "",
     "ig_user_id": "",
-    "hashtags": "#GenZAutomation #AItools #Automation #GenZ #NoCode #FutureOfWork"
-  },
-  "youtube": {
-    "api_key": ""
+    "hashtags": "#AItools #ChatGPT #AI #howto #productivity #AItutorial #genz #tech"
   },
   "image_hosting": {
     "imgbb_api_key": "YOUR_IMGBB_API_KEY"
   },
   "target_accounts": [
-    {
-      "username": "hormozi",
-      "category": "business_cta",
-      "weight": 1.5
-    },
-    {
-      "username": "alexhormozi",
-      "category": "business_cta",
-      "weight": 1.5
-    },
-    {
-      "username": "garyvee",
-      "category": "hustle_mindset",
-      "weight": 1.0
-    },
-    {
-      "username": "codie_sanchez",
-      "category": "unconventional_wealth",
-      "weight": 1.2
-    },
-    {
-      "username": "thefuturist_",
-      "category": "wealth_mindset",
-      "weight": 1.0
-    }
+    { "username": "theaigrid", "category": "ai_news", "weight": 1.2 },
+    { "username": "riley.brown.ai", "category": "ai_howto", "weight": 1.5 },
+    { "username": "heyrobinai", "category": "ai_tools_list", "weight": 1.3 },
+    { "username": "aiadvantage", "category": "ai_tutorial", "weight": 1.4 },
+    { "username": "matt_wolfe", "category": "ai_tools_review", "weight": 1.2 }
   ],
-  "topics_per_run": 7,
-  "brand_tone": "Gen Z cinematic dark aesthetic. Bold, direct, no fluff. Neon green energy. Psychological urgency. Speaks to young professionals who want financial independence through automation and AI.",
+  "topics_per_run": 5,
+  "brand_tone": "Gen Z AI-native energy. Practical, fast, no hype. Teaches young people how to actually use AI tools to work faster and smarter. Bold, direct, neon-green aesthetic, zero fluff. Every video leaves the viewer with something they can use today.",
   "image": {
     "width": 1080,
     "height": 1350,

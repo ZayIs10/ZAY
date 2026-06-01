@@ -1,6 +1,8 @@
 # Secrets — never commit these
 .env
 google_service_account.json
+google_oauth_client.json
+google_drive_token.json
 
 # Generated output files
 *.jpg
@@ -17,3 +19,37 @@ __pycache__/
 *.pyo
 .venv/
 venv/
+
+# Node / HyperFrames
+node_modules/
+package-lock.json
+reels/renders/
+reels/work-*/
+assets/reels/*.mp4
+assets/reels/work-*/
+.tmp_hyperframes/
+
+# Render scratch + final outputs (regenerable)
+renders/work-*/
+renders/*.mp4
+
+# Browser / playwright caches (auth state, NEVER commit)
+.fb_session/
+.playwright-mcp/
+
+# Loose screen recordings + screenshots in root
+/Recording*.mp4
+/Screenshot*.png
+
+# Logs
+logs/
+
+# Disposable scratch workspace (per CLAUDE.md — never commit)
+.tmp/
+
+# Local-only Claude Code settings
+.claude/settings.local.json
+
+# Stray local media anywhere (regenerable / large) — keep audio sidecar JSON
+*.mp4
+*.mp3

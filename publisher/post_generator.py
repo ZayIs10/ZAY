@@ -13,6 +13,7 @@ import io
 import json
 import logging
 import os
+import re
 import sys
 import time
 from datetime import datetime
@@ -33,6 +34,11 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 
 # Maps topic keyword sets → subject key in config["wealth_image_subjects"]
+def _strip_urls(text: str) -> str:
+    """Remove all HTTP/HTTPS URLs from text so they never appear in captions."""
+    return re.sub(r'https?://\S+', '', text).strip()
+
+
 TOPIC_SUBJECT_MAP = [
     ({"ai", "automation", "robot", "gpt", "machine",
      "algorithm", "software", "code", "developer"}, "ai_tech"),
@@ -182,8 +188,12 @@ class SheetsReader:
 
     def get_next_ready_row(self) -> dict | None:
         """Returns the first row where Status='Ready', or None."""
-        all_rows = self.ws.get_all_records()
-        for i, row in enumerate(all_rows, start=2):  # row 2 = first data row
+        all_values = self.ws.get_all_values()
+        if not all_values:
+            return None
+        headers = all_values[0]
+        for i, raw in enumerate(all_values[1:], start=2):
+            row = {headers[j]: raw[j] if j < len(raw) else "" for j in range(len(headers))}
             if str(row.get("Status", "")).strip().lower() == "ready":
                 row["_row_index"] = i
                 return row
@@ -233,7 +243,7 @@ class CaptionGenerator:
         topic = row.get("Topic", "")
         key_points = row.get("Key Points / Slide Content", "") or row.get("Key Points", "")
         brand_tone = row.get("Brand Tone", "Gen Z cinematic dark aesthetic. Bold, direct, no fluff. Neon green energy.")
-        enriched_context = row.get("Enriched Context", "")
+        enriched_context = _strip_urls(row.get("Enriched Context", ""))
 
         context_block = ""
         if enriched_context:
@@ -247,10 +257,18 @@ class CaptionGenerator:
             f"Key Points: {key_points}\n"
             f"Brand Tone: {brand_tone}\n"
             f"{context_block}\n"
-            "Generate post_caption: High-impact Instagram caption. Either ultra-short (5 words max) "
+            "Generate two fields:\n\n"
+            "1. post_caption: High-impact Instagram caption. Either ultra-short (5 words max) "
             "OR a punchy 3-4 line caption (Line 1: setup, Line 2: key number or power word, "
-            "Line 3: consequence). No emojis. Reference real numbers from context when available.\n\n"
-            "Return ONLY valid JSON with key: post_caption"
+            "Line 3: consequence). No emojis. Reference real numbers from context when available. "
+            "Always end with ONE short DM-share CTA (max 8 words, no emojis). "
+            "Examples: 'Send this to someone building wealth.' / 'Forward this to your group chat.' / "
+            "'Tag someone who needs to see this.'\n\n"
+            "2. reel_script: A 15-second vertical Reel voiceover script for this same topic. "
+            "Format: 5 punchy lines, each max 8 words. Line 1 = hook (shocking stat or bold claim). "
+            "Lines 2-4 = key insight per line. Line 5 = CTA ('Save this. Follow for more.'). "
+            "No emojis. Spoken word style — short, fast, punchy.\n\n"
+            "Return ONLY valid JSON with keys: post_caption, reel_script"
         )
 
         resp = self.client.chat.completions.create(
@@ -263,7 +281,7 @@ class CaptionGenerator:
                     "content": (
                         "You are a Gen Z social media copywriter for an AI/automation brand. "
                         "Bold, minimal, punchy. Direct, serious, high-stakes. No emojis. "
-                        "Output valid JSON with exactly one key: post_caption."
+                        "Output valid JSON with exactly two keys: post_caption and reel_script."
                     ),
                 },
                 {"role": "user", "content": user_msg},
@@ -276,6 +294,9 @@ class CaptionGenerator:
         safe_preview = result['post_caption'][:80].encode(
             'ascii', 'replace').decode('ascii')
         logging.info(f"Caption: {safe_preview}...")
+        if result.get("reel_script"):
+            safe_reel = result['reel_script'][:120].encode('ascii', 'replace').decode('ascii')
+            logging.info(f"Reel script: {safe_reel}...")
         return result
 
 
@@ -926,6 +947,9 @@ def main():
         caption_gen = CaptionGenerator(config, client, usage_guard=usage_guard)
         gpt_output = caption_gen.generate(row)
         caption = gpt_output["post_caption"]
+        reel_script = gpt_output.get("reel_script", "")
+        if reel_script:
+            logging.info(f"\n--- REEL SCRIPT ---\n{reel_script}\n-------------------")
 
     # Step 3: Build DALL-E prompt + generate image
     key_points = row.get("Key Points / Slide Content", "") or row.get("Key Points", "")

@@ -1,0 +1,98 @@
+name: Build Tweet-Card Reel
+
+# Fired by Workflow B (n8n) after it has written Media Video URL +
+# Media Image URL to a Reels-tab row that the user flipped to
+# Status="Ready".
+#
+# n8n call shape:
+#   POST https://api.github.com/repos/<owner>/<repo>/dispatches
+#   {
+#     "event_type": "build-tweet-card-reel",
+#     "client_payload": { "row_index": "17" }
+#   }
+#
+# Also runnable manually from the GitHub Actions UI (specify row_index).
+
+on:
+  repository_dispatch:
+    types: [build-tweet-card-reel]
+  workflow_dispatch:
+    inputs:
+      row_index:
+        description: "1-indexed Reels-tab row to render"
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      GOOGLE_SHEET_REELS_NAME: Reels
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install yt-dlp
+
+      - name: Write .env
+        run: |
+          printf "GOOGLE_SHEET_ID=%s\n" "$GOOGLE_SHEET_ID" >> .env
+          printf "GOOGLE_SHEET_REELS_NAME=%s\n" "$GOOGLE_SHEET_REELS_NAME" >> .env
+
+      - name: Write Google service account
+        run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > google_service_account.json
+
+      - name: Write Drive OAuth token
+        # Pre-authorized token JSON (run publish_reel.py locally once to mint it,
+        # then copy the contents of google_drive_token.json into this secret).
+        run: echo '${{ secrets.GOOGLE_DRIVE_TOKEN_JSON }}' > google_drive_token.json
+
+      - name: Resolve row index
+        id: row
+        run: |
+          ROW_INDEX="${{ github.event.client_payload.row_index || github.event.inputs.row_index }}"
+          if [ -z "$ROW_INDEX" ]; then
+            echo "::error::No row_index provided (client_payload.row_index or workflow_dispatch input)"
+            exit 1
+          fi
+          echo "value=$ROW_INDEX" >> "$GITHUB_OUTPUT"
+          echo "Building reel for Reels row $ROW_INDEX"
+
+      - name: Build reel
+        run: |
+          mkdir -p logs renders
+          python publisher/tweet_card_reel.py --row "${{ steps.row.outputs.value }}" 2>&1 \
+            | tee "logs/tweet_card_reel_row${{ steps.row.outputs.value }}.log"
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tweet-card-reel-logs-${{ github.run_id }}
+          path: logs/
+          retention-days: 7
+
+      - name: Upload reel mp4 (debug)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tweet-card-reel-mp4-${{ github.run_id }}
+          path: renders/*-tweet.mp4
+          retention-days: 7
+          if-no-files-found: ignore

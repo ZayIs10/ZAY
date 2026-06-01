@@ -1,18 +1,29 @@
 {
-  "name": "Gen Z Automation - Instagram Post Generation",
+  "name": "Gen Z Publisher - Daily Instagram Post",
   "nodes": [
     {
       "parameters": {
-        "pollTimes": {
-          "item": [Play Tiger
+        "rule": {
+          "interval": [
             {
-              "mode": "everyMinute"
+              "field": "cronExpression",
+              "expression": "0 10 * * 1-5"
             }
           ]
-        },
+        }
+      },
+      "id": "node_p1_schedule",
+      "name": "Schedule - Weekdays 10AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 400]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
         "documentId": {
           "__rl": true,
-          "value": "YOUR_GOOGLE_SHEET_ID",
+          "value": "13AEU80ULx2Lxnq9SWDeSSFN7unfhr-x_mPyi37oz7O4",
           "mode": "id"
         },
         "sheetName": {
@@ -20,40 +31,42 @@
           "value": "Sheet1",
           "mode": "name"
         },
-        "event": "rowAdded",
-        "options": {}
+        "options": {
+          "returnAll": true
+        }
       },
-      "id": "node_1_sheets_trigger",
-      "name": "Google Sheets Trigger",
-      "type": "n8n-nodes-base.googleSheetsTrigger",
-      "typeVersion": 1,
-      "position": [240, 300]
+      "id": "node_p2_get_rows",
+      "name": "Google Sheets - Get All Rows",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [480, 400]
     },
     {
       "parameters": {
-        "source": "database",
-        "workflowId": {
-          "__rl": true,
-          "value": "YOUR_WEB_RESEARCH_SUBWORKFLOW_ID",
-          "mode": "id"
-        },
-        "options": {
-          "waitForSubWorkflow": true
-        },
-        "fields": {
-          "values": [
+        "jsCode": "// Find the first row with Status = 'Ready'\nconst rows = $input.all();\nlet readyRow = null;\n\nfor (const row of rows) {\n  const status = (row.json.Status || '').trim();\n  if (status === 'Ready') {\n    readyRow = row.json;\n    break;\n  }\n}\n\nif (!readyRow) {\n  return [{ found: false, message: 'No ready topics in sheet' }];\n}\n\nreturn [{\n  found: true,\n  row_number: readyRow.row_number || readyRow.__rowNumber || '',\n  topic: readyRow.Topic || '',\n  key_points: readyRow['Key Points'] || '',\n  brand_tone: readyRow['Brand Tone'] || 'Gen Z Capital: Bold, cinematic, dark aesthetic.',\n  enriched_context: readyRow['Enriched Context'] || '',\n  post_type: readyRow['Post Type'] || 'single',\n  headline_line1: readyRow['Headline Line 1'] || '',\n  headline_line2: readyRow['Headline Line 2'] || '',\n  headline_line3: readyRow['Headline Line 3'] || '',\n  subheadline: readyRow['Subheadline'] || '',\n  cta: readyRow['CTA'] || 'Save this.'\n}];"
+      },
+      "id": "node_p3_find_ready",
+      "name": "Code - Find First Ready Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
             {
-              "name": "topic",
-              "stringValue": "={{ $json.Topic }}"
+              "value1": "={{ $json.found }}",
+              "value2": true
             }
           ]
         }
       },
-      "id": "node_1b_web_research",
-      "name": "Web Research - Topic Enrichment",
-      "type": "n8n-nodes-base.executeWorkflow",
-      "typeVersion": 1.1,
-      "position": [480, 300]
+      "id": "node_p4_if_found",
+      "name": "IF - Has Ready Topic?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [960, 400]
     },
     {
       "parameters": {
@@ -62,103 +75,391 @@
           "values": [
             {
               "role": "system",
-              "content": "You are a Gen Z social media copywriter for an AI/automation brand. Your style is bold, minimal, and punchy. You write captions that feel like they belong on a cinematic dark-aesthetic Instagram feed. Always output valid JSON with exactly two keys: post_caption and base_image_prompt."
+              "content": "You are a Gen Z social media copywriter AND a cinematic art director. You write for Gen Z Capital — a dark luxury wealth/AI brand. Style: direct, serious, high-stakes, NO hype, NO emojis. Neon green energy. Output ONLY a valid JSON object."
             },
             {
               "role": "user",
-              "content": "=Topic: {{ $('Google Sheets Trigger').item.json.Topic }}\nKey Points: {{ $('Google Sheets Trigger').item.json['Key Points'] }}\nBrand Tone: {{ $('Google Sheets Trigger').item.json['Brand Tone'] }}\n\nREAL-WORLD CONTEXT (use specific stats/facts to make content more credible and professional):\n{{ $json.enriched_context }}\n\nGenerate:\n1. post_caption: A high-impact Instagram caption. Either ultra-short (5 words max) OR a punchy multi-line caption. Use neon green energy in the writing style. Reference real numbers or facts from the context above when they strengthen the message.\n2. base_image_prompt: A cinematic, dark-aesthetic image prompt for DALL-E 3. The image MUST leave a clearly defined dark/black zone on the lower portion for text overlay. Specify this in the prompt.\n\nReturn only valid JSON."
+              "content": "=Topic: {{ $json.topic }}\nKey Points: {{ $json.key_points }}\nBrand Tone: {{ $json.brand_tone }}\nContext: {{ $json.enriched_context }}\n\nExisting headline (use if good, or improve):\n- Line 1 (white): {{ $json.headline_line1 }}\n- Line 2 (neon green): {{ $json.headline_line2 }}\n- Line 3 (white): {{ $json.headline_line3 }}\n- Subheadline (gray): {{ $json.subheadline }}\n\nGenerate a JSON object with exactly these keys:\n1. post_caption: High-impact Instagram caption. Punchy. Use real facts from context. Max 150 words. No emojis.\n2. headline_line1: UPPERCASE, max 5 words, white text, the SETUP hook\n3. headline_line2: UPPERCASE, max 4 words, NEON GREEN text, the KEY STAT or POWER WORD\n4. headline_line3: UPPERCASE, max 5 words, white text, the CONSEQUENCE\n5. subheadline: lowercase, max 12 words, gray text\n6. dalle_prompt: Cinematic DALL-E 3 prompt. Dark, moody, ultra-realistic. Specific to topic. No faces. No text in image. Shot on RED Komodo 6K, anamorphic lens, deep shadows. Max 80 words.\n\nReturn ONLY the JSON object."
             }
           ]
         },
         "options": {
           "temperature": 0.8,
-          "response_format": {
-            "type": "json_object"
-          }
+          "response_format": { "type": "json_object" }
         }
       },
-      "id": "node_2_openai",
+      "id": "node_p5_openai_caption",
       "name": "OpenAI - Generate Caption & Image Prompt",
       "type": "@n8n/n8n-nodes-langchain.openAi",
       "typeVersion": 1.4,
-      "position": [720, 300]
+      "position": [1200, 280]
     },
     {
       "parameters": {
-        "jsCode": "// Parse OpenAI JSON output\nconst openaiOutput = JSON.parse($input.item.json.message.content);\nconst postCaption = openaiOutput.post_caption;\nconst baseImagePrompt = openaiOutput.base_image_prompt;\n\n// Count words in caption\nconst wordCount = postCaption.trim().split(/\\s+/).length;\n\n// Calculate required black space percentage based on word count\nlet blackSpacePercent;\nlet textOverlayY;\nlet fontSize;\n\nif (wordCount <= 5) {\n  blackSpacePercent = 20;\n  textOverlayY = 82;\n  fontSize = 72;\n} else if (wordCount <= 15) {\n  blackSpacePercent = 30;\n  textOverlayY = 72;\n  fontSize = 56;\n} else {\n  blackSpacePercent = 40;\n  textOverlayY = 62;\n  fontSize = 44;\n}\n\nconst imageWidth = 1080;\nconst imageHeight = 1350;\nconst textOverlayYpx = Math.round((textOverlayY / 100) * imageHeight);\nconst textAreaHeightPx = imageHeight - textOverlayYpx - 40;\n\nconst enrichedImagePrompt = `${baseImagePrompt}. The bottom ${blackSpacePercent}% of the image must be a solid deep black or near-black zone with no subject matter, specifically reserved for bold white text overlay. Cinematic dark aesthetic, high contrast, ultra-wide shot.`;\n\nreturn {\n  post_caption: postCaption,\n  base_image_prompt: enrichedImagePrompt,\n  word_count: wordCount,\n  black_space_percent: blackSpacePercent,\n  text_overlay_y: textOverlayYpx,\n  text_area_height: textAreaHeightPx,\n  font_size: fontSize,\n  image_width: imageWidth,\n  image_height: imageHeight,\n  topic: $('Google Sheets Trigger').item.json.Topic,\n  row_number: $('Google Sheets Trigger').item.json.row_number || $('Google Sheets Trigger').item.json.__rowNumber\n};"
+        "jsCode": "// Parse OpenAI output and pass topic data downstream\nlet raw;\ntry {\n  let content = $input.item.json.message?.content || $input.item.json.choices?.[0]?.message?.content || '{}';\n  // Strip markdown code fences if OpenAI wraps response in ```json ... ```\n  content = content.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/, '').trim();\n  raw = JSON.parse(content);\n} catch (e) {\n  throw new Error('Failed to parse OpenAI JSON: ' + e.message);\n}\n\nconst prevNode = $('Code - Find First Ready Row').item.json;\n\nreturn {\n  row_number: prevNode.row_number,\n  topic: prevNode.topic,\n  post_type: prevNode.post_type,\n  post_caption: raw.post_caption || '',\n  headline_line1: (raw.headline_line1 || '').toUpperCase(),\n  headline_line2: (raw.headline_line2 || '').toUpperCase(),\n  headline_line3: (raw.headline_line3 || '').toUpperCase(),\n  subheadline: (raw.subheadline || '').toLowerCase(),\n  dalle_prompt: raw.dalle_prompt || `Cinematic dark luxury scene related to ${prevNode.topic}. Deep shadows. No text. No faces. Shot on RED Komodo 6K anamorphic lens.`\n};"
       },
-      "id": "node_3_code",
-      "name": "JS - Layout & Spacing Calculation",
+      "id": "node_p6_parse_output",
+      "name": "Code - Parse OpenAI Output",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [960, 300]
+      "position": [1440, 280]
     },
     {
       "parameters": {
         "resource": "image",
         "operation": "generate",
-        "prompt": "={{ $json.base_image_prompt }}",
+        "prompt": "={{ $json.dalle_prompt }}",
         "size": "1024x1792",
         "quality": "hd",
         "style": "vivid",
         "response_format": "url"
       },
-      "id": "node_4_dalle",
-      "name": "DALL-E 3 - Generate Base Image",
+      "id": "node_p7_dalle",
+      "name": "DALL-E 3 - Generate Image",
       "type": "@n8n/n8n-nodes-langchain.openAi",
       "typeVersion": 1.4,
-      "position": [1200, 300]
+      "position": [1680, 280]
     },
     {
       "parameters": {
-        "authentication": "apiKey",
-        "resource": "image",
-        "operation": "create",
-        "templateId": "YOUR_BANNERBEAR_TEMPLATE_ID",
-        "modifications": {
-          "values": [
+        "jsCode": "// Extract the image URL from DALL-E response and merge with previous data\nconst dalleResponse = $input.item.json;\nconst prevData = $('Code - Parse OpenAI Output').item.json;\n\nconst imageUrl = dalleResponse.data?.[0]?.url || dalleResponse.url || '';\n\nif (!imageUrl) {\n  throw new Error('No image URL from DALL-E. Response: ' + JSON.stringify(dalleResponse));\n}\n\nreturn {\n  ...prevData,\n  dalle_image_url: imageUrl\n};"
+      },
+      "id": "node_p8_extract_url",
+      "name": "Code - Extract DALL-E URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1920, 280]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.dalle_image_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "id": "node_p9_download_image",
+      "name": "HTTP - Download DALL-E Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2160, 280]
+    },
+    {
+      "parameters": {
+        "operation": "resize",
+        "width": 1080,
+        "height": 1350,
+        "resizeOption": "cover",
+        "dataPropertyName": "data"
+      },
+      "id": "node_p10_resize",
+      "name": "Edit Image - Resize 1080x1350",
+      "type": "n8n-nodes-base.editImage",
+      "typeVersion": 1,
+      "position": [2400, 280]
+    },
+    {
+      "parameters": {
+        "operation": "draw",
+        "dataPropertyName": "data",
+        "drawOptions": {
+          "primitive": "rectangle",
+          "color": "#000000",
+          "startX": 0,
+          "startY": 810,
+          "endX": 1080,
+          "endY": 1350,
+          "cornerRadius": 0
+        }
+      },
+      "id": "node_black_zone",
+      "name": "Edit Image - Draw Black Zone",
+      "type": "n8n-nodes-base.editImage",
+      "typeVersion": 1,
+      "position": [2640, 280]
+    },
+    {
+      "parameters": {
+        "operation": "draw",
+        "dataPropertyName": "data",
+        "drawOptions": {
+          "primitive": "rectangle",
+          "color": "#39FF14",
+          "startX": 40,
+          "startY": 861,
+          "endX": 395,
+          "endY": 863,
+          "cornerRadius": 0
+        }
+      },
+      "id": "node_neon_left",
+      "name": "Edit Image - Neon Line Left",
+      "type": "n8n-nodes-base.editImage",
+      "typeVersion": 1,
+      "position": [2880, 280]
+    },
+    {
+      "parameters": {
+        "operation": "draw",
+        "dataPropertyName": "data",
+        "drawOptions": {
+          "primitive": "rectangle",
+          "color": "#39FF14",
+          "startX": 685,
+          "startY": 861,
+          "endX": 1040,
+          "endY": 863,
+          "cornerRadius": 0
+        }
+      },
+      "id": "node_neon_right",
+      "name": "Edit Image - Neon Line Right",
+      "type": "n8n-nodes-base.editImage",
+      "typeVersion": 1,
+      "position": [3120, 280]
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "text": "GenZ",
+        "font": "Impact",
+        "fontSize": 54,
+        "fontColor": "#FFFFFF",
+        "lineHeight": 60,
+        "textAlignment": "center",
+        "positionX": 0,
+        "positionY": 822,
+        "maxWidth": 1040,
+        "dataPropertyName": "data"
+      },
+      "id": "node_logo_genz",
+      "name": "Edit Image - Logo GenZ",
+      "type": "n8n-nodes-base.editImage",
+      "typeVersion": 1,
+      "position": [3360, 280]
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "text": "CAPITAL",
+        "font": "Impact",
+        "fontSize": 32,
+        "fontColor": "#39FF14",
+        "lineHeight": 38,
+        "textAlignment": "center",
+        "positionX": 0,
+        "positionY": 878,
+        "maxWidth": 1040,
+        "dataPropertyName": "data"
+      },
+      "id": "node_logo_capital",
+      "name": "Edit Image - Logo Capital",
+      "type": "n8n-nodes-base.editImage",
+      "typeVersion": 1,
+      "position": [3600, 280]
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "text": "={{ $('Code - Parse OpenAI Output').item.json.headline_line1 }}",
+        "font": "Impact",
+        "fontSize": 90,
+        "fontColor": "#FFFFFF",
+        "lineHeight": 100,
+        "textAlignment": "center",
+        "positionX": 0,
+        "positionY": 930,
+        "maxWidth": 1040,
+        "dataPropertyName": "data"
+      },
+      "id": "node_p11_text_line1",
+      "name": "Edit Image - Headline Line 1 (White)",
+      "type": "n8n-nodes-base.editImage",
+      "typeVersion": 1,
+      "position": [3840, 280]
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "text": "={{ $('Code - Parse OpenAI Output').item.json.headline_line2 }}",
+        "font": "Impact",
+        "fontSize": 110,
+        "fontColor": "#39FF14",
+        "lineHeight": 120,
+        "textAlignment": "center",
+        "positionX": 0,
+        "positionY": 1042,
+        "maxWidth": 1040,
+        "dataPropertyName": "data"
+      },
+      "id": "node_p12_text_line2",
+      "name": "Edit Image - Headline Line 2 (Neon Green)",
+      "type": "n8n-nodes-base.editImage",
+      "typeVersion": 1,
+      "position": [4080, 280]
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "text": "={{ $('Code - Parse OpenAI Output').item.json.headline_line3 }}",
+        "font": "Impact",
+        "fontSize": 90,
+        "fontColor": "#FFFFFF",
+        "lineHeight": 100,
+        "textAlignment": "center",
+        "positionX": 0,
+        "positionY": 1172,
+        "maxWidth": 1040,
+        "dataPropertyName": "data"
+      },
+      "id": "node_p13_text_line3",
+      "name": "Edit Image - Headline Line 3 (White)",
+      "type": "n8n-nodes-base.editImage",
+      "typeVersion": 1,
+      "position": [4320, 280]
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "text": "={{ $('Code - Parse OpenAI Output').item.json.subheadline }}",
+        "font": "Open Sans",
+        "fontSize": 38,
+        "fontColor": "#A0A0A0",
+        "lineHeight": 48,
+        "textAlignment": "center",
+        "positionX": 0,
+        "positionY": 1278,
+        "maxWidth": 960,
+        "dataPropertyName": "data"
+      },
+      "id": "node_p14_text_sub",
+      "name": "Edit Image - Subheadline (Gray)",
+      "type": "n8n-nodes-base.editImage",
+      "typeVersion": 1,
+      "position": [4560, 280]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://litterbox.catbox.moe/resources/internals/api.php",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "reqtype", "value": "fileupload" },
+            { "name": "time", "value": "72h" },
             {
-              "uid": "background_image",
-              "imageUrl": "={{ $json.data[0].url }}"
-            },
-            {
-              "uid": "caption_text",
-              "text": "={{ $('JS - Layout & Spacing Calculation').item.json.post_caption }}",
-              "color": "#FFFFFF",
-              "fontSize": "={{ $('JS - Layout & Spacing Calculation').item.json.font_size }}"
+              "name": "fileToUpload",
+              "parameterType": "formBinaryData",
+              "inputDataFieldName": "data"
             }
           ]
         },
         "options": {
-          "synchronous": true
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
         }
       },
-      "id": "node_5_bannerbear",
-      "name": "Bannerbear - Format & Overlay Text",
-      "type": "n8n-nodes-base.bannerbear",
-      "typeVersion": 1,
-      "position": [1440, 300]
+      "id": "node_p15_litterbox",
+      "name": "HTTP - Upload to Litterbox",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [4800, 280]
     },
     {
       "parameters": {
-        "resource": "mediaContainer",
-        "operation": "create",
-        "imageUrl": "={{ $json.image_url }}",
-        "caption": "={{ $('JS - Layout & Spacing Calculation').item.json.post_caption }}\n\n#GenZAutomation #AItools #Automation #GenZ #NoCode #FutureOfWork",
-        "additionalFields": {}
+        "jsCode": "// Extract the Litterbox public URL\nconst resp = $input.item.json;\nconst url = (resp.data || resp.body || '').trim();\n\nif (!url.startsWith('http')) {\n  throw new Error('Litterbox upload failed. Response: ' + JSON.stringify(resp));\n}\n\nconst prevData = $('Code - Parse OpenAI Output').item.json;\n\nreturn {\n  ...prevData,\n  final_image_url: url,\n  imgbb_page: url\n};"
       },
-      "id": "node_6_instagram",
+      "id": "node_p16_extract_litterbox_url",
+      "name": "Code - Extract Litterbox URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [5040, 280]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v19.0/17841478285470926/media",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "image_url", "value": "={{ $json.final_image_url }}" },
+            { "name": "caption", "value": "={{ $json.post_caption }}\n\n#GenZCapital #WealthBuilding #AIAutomation #GenZ #MoneyMindset #Investing" },
+            { "name": "access_token", "value": "EAAbzxVfZAZBMEBRENidKmztqn0nP2QZAU2qrSNvgZAxzsXcCgqE9HZB1ZCz4nhpLxCnNivhFLKQ7EGg5VFDOEnaUiZAcGSFeExWEVnB7MyxXajP2ZAmgqfDJXUcTB9jqGFhIZAimpSSfMyInxzWQU0WAn2zOuyy7lLoIti78g8plj0BFV1Ah5Fpmv75jwlUHAdEiBzvv1gPRL1usxQMDHxTcuIbJHZCnqBV7Sd3EF5wR3taYl25ovxVUfoqbKckIk4dAs5dKZCkrsPZADVCXRQiobJubtEtLsi0wI21ZAKPaj0AZDZD" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node_p17_ig_create",
+      "name": "Instagram - Create Media Container",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [5280, 280]
+    },
+    {
+      "parameters": {
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "id": "node_p18_wait",
+      "name": "Wait - 30 Seconds",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [5520, 280]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract container ID and merge with row data\nconst igResponse = $input.item.json;\nconst containerId = igResponse.id || '';\n\nif (!containerId) {\n  throw new Error('Instagram container creation failed: ' + JSON.stringify(igResponse));\n}\n\nconst prevData = $('Code - Extract Litterbox URL').item.json;\n\nreturn {\n  ...prevData,\n  container_id: containerId\n};"
+      },
+      "id": "node_p19_extract_container",
+      "name": "Code - Extract Container ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [5760, 280]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v19.0/17841478285470926/media_publish",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "creation_id", "value": "={{ $json.container_id }}" },
+            { "name": "access_token", "value": "EAAbzxVfZAZBMEBRENidKmztqn0nP2QZAU2qrSNvgZAxzsXcCgqE9HZB1ZCz4nhpLxCnNivhFLKQ7EGg5VFDOEnaUiZAcGSFeExWEVnB7MyxXajP2ZAmgqfDJXUcTB9jqGFhIZAimpSSfMyInxzWQU0WAn2zOuyy7lLoIti78g8plj0BFV1Ah5Fpmv75jwlUHAdEiBzvv1gPRL1usxQMDHxTcuIbJHZCnqBV7Sd3EF5wR3taYl25ovxVUfoqbKckIk4dAs5dKZCkrsPZADVCXRQiobJubtEtLsi0wI21ZAKPaj0AZDZD" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node_p20_ig_publish",
       "name": "Instagram - Publish Post",
-      "type": "n8n-nodes-base.instagram",
-      "typeVersion": 1,
-      "position": [1680, 300]
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [6000, 280]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract post ID and build permalink\nconst igResp = $input.item.json;\nconst postId = igResp.id || '';\nconst prevData = $('Code - Extract Container ID').item.json;\n\nreturn {\n  row_number: prevData.row_number,\n  post_id: postId,\n  post_url: postId ? `https://www.instagram.com/p/${postId}/` : 'N/A',\n  published_date: new Date().toISOString().split('T')[0]\n};"
+      },
+      "id": "node_p21_extract_post",
+      "name": "Code - Extract Post Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [6240, 280]
     },
     {
       "parameters": {
         "operation": "update",
         "documentId": {
           "__rl": true,
-          "value": "YOUR_GOOGLE_SHEET_ID",
+          "value": "13AEU80ULx2Lxnq9SWDeSSFN7unfhr-x_mPyi37oz7O4",
           "mode": "id"
         },
         "sheetName": {
@@ -169,99 +470,103 @@
         "columns": {
           "mappingMode": "defineBelow",
           "value": {
-            "row_number": "={{ $('JS - Layout & Spacing Calculation').item.json.row_number }}",
+            "row_number": "={{ $json.row_number }}",
             "Status": "Published",
-            "Published Date": "={{ new Date().toISOString().split('T')[0] }}",
-            "Post URL": "={{ $json.permalink || 'N/A' }}",
-            "Instagram Post ID": "={{ $json.id || 'N/A' }}"
+            "Published Date": "={{ $json.published_date }}",
+            "Post URL": "={{ $json.post_url }}",
+            "Instagram Post ID": "={{ $json.post_id }}"
           }
         },
         "options": {}
       },
-      "id": "node_7_sheets_update",
-      "name": "Google Sheets - Update Status",
+      "id": "node_p22_update_sheet",
+      "name": "Google Sheets - Mark Published",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.4,
-      "position": [1920, 300]
+      "position": [6480, 280]
     }
   ],
   "connections": {
-    "Google Sheets Trigger": {
-      "main": [
-        [
-          {
-            "node": "Web Research - Topic Enrichment",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+    "Schedule - Weekdays 10AM": {
+      "main": [[{ "node": "Google Sheets - Get All Rows", "type": "main", "index": 0 }]]
     },
-    "Web Research - Topic Enrichment": {
+    "Google Sheets - Get All Rows": {
+      "main": [[{ "node": "Code - Find First Ready Row", "type": "main", "index": 0 }]]
+    },
+    "Code - Find First Ready Row": {
+      "main": [[{ "node": "IF - Has Ready Topic?", "type": "main", "index": 0 }]]
+    },
+    "IF - Has Ready Topic?": {
       "main": [
-        [
-          {
-            "node": "OpenAI - Generate Caption & Image Prompt",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [{ "node": "OpenAI - Generate Caption & Image Prompt", "type": "main", "index": 0 }],
+        []
       ]
     },
     "OpenAI - Generate Caption & Image Prompt": {
-      "main": [
-        [
-          {
-            "node": "JS - Layout & Spacing Calculation",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Code - Parse OpenAI Output", "type": "main", "index": 0 }]]
     },
-    "JS - Layout & Spacing Calculation": {
-      "main": [
-        [
-          {
-            "node": "DALL-E 3 - Generate Base Image",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+    "Code - Parse OpenAI Output": {
+      "main": [[{ "node": "DALL-E 3 - Generate Image", "type": "main", "index": 0 }]]
     },
-    "DALL-E 3 - Generate Base Image": {
-      "main": [
-        [
-          {
-            "node": "Bannerbear - Format & Overlay Text",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+    "DALL-E 3 - Generate Image": {
+      "main": [[{ "node": "Code - Extract DALL-E URL", "type": "main", "index": 0 }]]
     },
-    "Bannerbear - Format & Overlay Text": {
-      "main": [
-        [
-          {
-            "node": "Instagram - Publish Post",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+    "Code - Extract DALL-E URL": {
+      "main": [[{ "node": "HTTP - Download DALL-E Image", "type": "main", "index": 0 }]]
+    },
+    "HTTP - Download DALL-E Image": {
+      "main": [[{ "node": "Edit Image - Resize 1080x1350", "type": "main", "index": 0 }]]
+    },
+    "Edit Image - Resize 1080x1350": {
+      "main": [[{ "node": "Edit Image - Draw Black Zone", "type": "main", "index": 0 }]]
+    },
+    "Edit Image - Draw Black Zone": {
+      "main": [[{ "node": "Edit Image - Neon Line Left", "type": "main", "index": 0 }]]
+    },
+    "Edit Image - Neon Line Left": {
+      "main": [[{ "node": "Edit Image - Neon Line Right", "type": "main", "index": 0 }]]
+    },
+    "Edit Image - Neon Line Right": {
+      "main": [[{ "node": "Edit Image - Logo GenZ", "type": "main", "index": 0 }]]
+    },
+    "Edit Image - Logo GenZ": {
+      "main": [[{ "node": "Edit Image - Logo Capital", "type": "main", "index": 0 }]]
+    },
+    "Edit Image - Logo Capital": {
+      "main": [[{ "node": "Edit Image - Headline Line 1 (White)", "type": "main", "index": 0 }]]
+    },
+    "Edit Image - Headline Line 1 (White)": {
+      "main": [[{ "node": "Edit Image - Headline Line 2 (Neon Green)", "type": "main", "index": 0 }]]
+    },
+    "Edit Image - Headline Line 2 (Neon Green)": {
+      "main": [[{ "node": "Edit Image - Headline Line 3 (White)", "type": "main", "index": 0 }]]
+    },
+    "Edit Image - Headline Line 3 (White)": {
+      "main": [[{ "node": "Edit Image - Subheadline (Gray)", "type": "main", "index": 0 }]]
+    },
+    "Edit Image - Subheadline (Gray)": {
+      "main": [[{ "node": "HTTP - Upload to Litterbox", "type": "main", "index": 0 }]]
+    },
+    "HTTP - Upload to Litterbox": {
+      "main": [[{ "node": "Code - Extract Litterbox URL", "type": "main", "index": 0 }]]
+    },
+    "Code - Extract Litterbox URL": {
+      "main": [[{ "node": "Instagram - Create Media Container", "type": "main", "index": 0 }]]
+    },
+    "Instagram - Create Media Container": {
+      "main": [[{ "node": "Wait - 30 Seconds", "type": "main", "index": 0 }]]
+    },
+    "Wait - 30 Seconds": {
+      "main": [[{ "node": "Code - Extract Container ID", "type": "main", "index": 0 }]]
+    },
+    "Code - Extract Container ID": {
+      "main": [[{ "node": "Instagram - Publish Post", "type": "main", "index": 0 }]]
     },
     "Instagram - Publish Post": {
-      "main": [
-        [
-          {
-            "node": "Google Sheets - Update Status",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Code - Extract Post Data", "type": "main", "index": 0 }]]
+    },
+    "Code - Extract Post Data": {
+      "main": [[{ "node": "Google Sheets - Mark Published", "type": "main", "index": 0 }]]
     }
   },
   "settings": {
@@ -269,6 +574,6 @@
   },
   "staticData": null,
   "meta": {
-    "instanceId": "gen-z-automation-instagram"
+    "instanceId": "72266cf7104999cf4ca85f63c2ab37a3e4761c531fdaf0c90ee0d01f4616b5e6"
   }
 }

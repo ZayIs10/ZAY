@@ -15,14 +15,20 @@ Usage:
 import json
 import logging
 import os
+import re
 import time
-from datetime import datetime
 
 import requests
 from openai import OpenAI
 
-from post_generator import ImageGenerator, ImageProcessor, ImageUploader, build_dalle_prompt
+from post_generator import (ImageGenerator, ImageProcessor,
+                             ImageUploader, build_dalle_prompt)
 from usage_guard import UsageGuard
+
+
+def _strip_urls(text: str) -> str:
+    """Remove all HTTP/HTTPS URLs from text so they never appear in captions."""
+    return re.sub(r'https?://\S+', '', text).strip()
 
 
 # ---------------------------------------------------------------------------
@@ -31,13 +37,15 @@ from usage_guard import UsageGuard
 
 SLIDE_SYSTEM_PROMPT = (
     "You are a carousel content architect for Gen Z Capital, a wealth/AI/automation brand. "
-    "Output exactly 8 slides as a JSON array. Tone: bold, direct, no fluff, no emojis. "
-    "Dark cinematic aesthetic. Each slide must have: "
+    "Tone: bold, direct, no fluff, no emojis. Dark cinematic aesthetic. "
+    "Each slide must have: "
     "slide_type (string), headline (string, max 7 words), "
     "body (string, max 18 words, empty string for cover/stat/cta), "
     "accent_number (string, only for stat slide, else empty string).\n\n"
     "Slide structure:\n"
-    "  [0] slide_type='cover'   — Hook headline. Curiosity gap. 3-5 words.\n"
+    "  [0] slide_type='cover'   — Hook headline. Must start with a bold number or shocking claim. "
+    "Must end with unresolved tension that forces a swipe. Max 6 words. "
+    "Example: '97% of people miss this.'\n"
     "  [1] slide_type='content' — Key insight 1. Short headline + 1-sentence body.\n"
     "  [2] slide_type='content' — Key insight 2.\n"
     "  [3] slide_type='content' — Key insight 3.\n"
@@ -45,8 +53,8 @@ SLIDE_SYSTEM_PROMPT = (
     "  [5] slide_type='content' — Key insight 5.\n"
     "  [6] slide_type='stat'    — One powerful statistic. accent_number = the number (e.g. '47%'), "
     "headline = short label (e.g. 'of Gen Z uses AI daily').\n"
-    "  [7] slide_type='cta'     — headline = 'SAVE THIS.' or 'FOLLOW FOR MORE'\n\n"
-    "Return ONLY a valid JSON array of exactly 8 objects."
+    "  [7] slide_type='cta'     — headline = 'SAVE THIS.' always. No other options.\n\n"
+    'Return ONLY valid JSON in this exact format: {"slides": [<8 slide objects>]}'
 )
 
 
@@ -61,7 +69,7 @@ class CarouselContentGenerator:
         """Returns list of 8 slide dicts."""
         topic = row.get("Topic", "")
         key_points = row.get("Key Points / Slide Content", "") or row.get("Key Points", "")
-        enriched = row.get("Enriched Context", "")
+        enriched = _strip_urls(row.get("Enriched Context", ""))
 
         context_block = f"\nReal-world context: {enriched}" if enriched else ""
 
@@ -76,6 +84,7 @@ class CarouselContentGenerator:
             resp = self.client.chat.completions.create(
                 model=self.model,
                 temperature=self.temperature,
+                response_format={"type": "json_object"},
                 messages=[
                     {"role": "system", "content": SLIDE_SYSTEM_PROMPT},
                     {"role": "user", "content": user_msg},
@@ -86,25 +95,17 @@ class CarouselContentGenerator:
                     getattr(resp, "usage", None))
             raw = resp.choices[0].message.content.strip()
 
-            # Strip markdown code fences if present
-            if raw.startswith("```"):
-                raw = raw.split("```")[1]
-                if raw.startswith("json"):
-                    raw = raw[4:]
-                raw = raw.strip()
-
             try:
-                slides = json.loads(raw)
+                parsed = json.loads(raw)
+                slides = parsed.get("slides", parsed) if isinstance(parsed, dict) else parsed
                 if isinstance(slides, list) and len(slides) == 8:
-                    logging.info(
-                        f"Carousel content generated: {len(slides)} slides")
+                    logging.info(f"Carousel content generated: {len(slides)} slides")
                     return slides
                 logging.warning(
                     f"GPT returned {len(slides) if isinstance(slides, list) else 'non-list'} "
                     f"slides (attempt {attempt+1}), retrying...")
             except json.JSONDecodeError as e:
-                logging.warning(
-                    f"Slide JSON parse error (attempt {attempt+1}): {e}")
+                logging.warning(f"Slide JSON parse error (attempt {attempt+1}): {e}")
 
         raise RuntimeError(
             "Failed to generate exactly 8 carousel slides after 2 attempts.")
@@ -209,11 +210,8 @@ class CarouselBuilder:
         """Build the full Instagram caption from the row data + CTA slide."""
         topic = row.get("Topic", "")
         hashtags = self.ig_cfg.get("hashtags", "")
-        cta_slide = next(
-            (s for s in slides if s.get("slide_type") == "cta"), None)
-        cta_text = cta_slide.get(
-            "headline", "Follow for more.") if cta_slide else "Follow for more."
-        return f"{topic}\n\n{cta_text}\n\n{hashtags}".strip()
+        cta = "Save this. Send it to someone building wealth."
+        return f"{topic}\n\n{cta}\n\n{hashtags}".strip()
 
     def _publish_carousel(self, slide_urls: list, caption: str) -> tuple:
         """Create child containers → carousel container → publish. Returns (post_id, post_url)."""

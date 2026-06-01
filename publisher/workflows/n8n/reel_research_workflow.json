@@ -1,0 +1,350 @@
+{
+  "name": "Gen Z AI Tools - Daily YouTube Short Topic Finder",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * *"
+            }
+          ]
+        }
+      },
+      "id": "node_r1_schedule",
+      "name": "Schedule - Daily 6AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [200, 200]
+    },
+    {
+      "parameters": {},
+      "id": "node_r1b_manual",
+      "name": "Manual Trigger - Run On Demand",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [200, 460]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.reddit.com/r/ChatGPT+OpenAI+artificial+ArtificialInteligence+aitools+productivity+automation+SideProject/hot.json?limit=100&raw_json=1",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "User-Agent", "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" },
+            { "name": "Accept", "value": "application/json" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node_r2_reddit",
+      "name": "HTTP - Reddit AI Posts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [480, 60],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/youtube/v3/search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "part", "value": "snippet" },
+            { "name": "type", "value": "video" },
+            { "name": "order", "value": "viewCount" },
+            { "name": "maxResults", "value": "20" },
+            { "name": "q", "value": "best AI tools 2026" },
+            { "name": "publishedAfter", "value": "={{ new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString() }}" },
+            { "name": "key", "value": "={{ $env.YOUTUBE_API_KEY }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node_r3_youtube_tools",
+      "name": "HTTP - YouTube Best AI Tools",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [480, 240],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/youtube/v3/search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "part", "value": "snippet" },
+            { "name": "type", "value": "video" },
+            { "name": "order", "value": "viewCount" },
+            { "name": "maxResults", "value": "20" },
+            { "name": "q", "value": "how to use AI tutorial" },
+            { "name": "publishedAfter", "value": "={{ new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString() }}" },
+            { "name": "key", "value": "={{ $env.YOUTUBE_API_KEY }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node_r4_youtube_howto",
+      "name": "HTTP - YouTube AI How-To",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [480, 420],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://techcrunch.com/category/artificial-intelligence/feed/",
+        "options": {}
+      },
+      "id": "node_r5_rss",
+      "name": "RSS - TechCrunch AI",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.1,
+      "position": [480, 600],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Reddit /hot.json -> normalized candidate list.\n// Tolerates a failed/blocked Reddit call (returns an empty list instead of crashing).\nconst res = ($input.first() && $input.first().json) || {};\nconst children = (res.data && res.data.children) || [];\nconst candidates = children\n  .map(c => c.data)\n  .filter(Boolean)\n  .map(d => ({\n    title: (d.title || '').trim(),\n    summary: (d.selftext || '').slice(0, 300),\n    url: 'https://www.reddit.com' + (d.permalink || ''),\n    source: 'reddit',\n    engagement: (d.ups || 0) + (d.num_comments || 0)\n  }));\nreturn [{ json: { candidates } }];"
+      },
+      "id": "node_r6_norm_reddit",
+      "name": "Code - Normalize Reddit",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [760, 60]
+    },
+    {
+      "parameters": {
+        "jsCode": "// YouTube search -> normalized candidate list (used for both YouTube nodes).\nconst res = ($input.first() && $input.first().json) || {};\nconst items = (res.items) || [];\nconst candidates = items\n  .filter(it => it.id && it.id.videoId)\n  .map(it => ({\n    title: (it.snippet.title || '').trim(),\n    summary: (it.snippet.description || '').slice(0, 300),\n    url: 'https://www.youtube.com/watch?v=' + it.id.videoId,\n    source: 'youtube',\n    engagement: 0\n  }));\nreturn [{ json: { candidates } }];"
+      },
+      "id": "node_r7_norm_yt_tools",
+      "name": "Code - Normalize YouTube Tools",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [760, 240]
+    },
+    {
+      "parameters": {
+        "jsCode": "// YouTube search -> normalized candidate list (used for both YouTube nodes).\nconst res = ($input.first() && $input.first().json) || {};\nconst items = (res.items) || [];\nconst candidates = items\n  .filter(it => it.id && it.id.videoId)\n  .map(it => ({\n    title: (it.snippet.title || '').trim(),\n    summary: (it.snippet.description || '').slice(0, 300),\n    url: 'https://www.youtube.com/watch?v=' + it.id.videoId,\n    source: 'youtube',\n    engagement: 0\n  }));\nreturn [{ json: { candidates } }];"
+      },
+      "id": "node_r8_norm_yt_howto",
+      "name": "Code - Normalize YouTube How-To",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [760, 420]
+    },
+    {
+      "parameters": {
+        "jsCode": "// RSS feed items -> normalized candidate list\nconst items = $input.all();\nconst candidates = items\n  .map(i => i.json)\n  .filter(Boolean)\n  .map(a => ({\n    title: (a.title || '').trim(),\n    summary: (a.contentSnippet || a.content || '').slice(0, 300),\n    url: a.link || '',\n    source: 'news',\n    engagement: 0\n  }));\nreturn [{ json: { candidates } }];"
+      },
+      "id": "node_r9_norm_rss",
+      "name": "Code - Normalize RSS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [760, 600]
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "numberInputs": 4
+      },
+      "id": "node_r10_merge",
+      "name": "Merge - All Candidates",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [1040, 320]
+    },
+    {
+      "parameters": {
+        "jsCode": "// AI-how-to-fit scoring. Keeps only topics that teach the viewer one\n// concrete, usable thing about an AI tool (how to use it, or the best\n// tools for a task) and that collapse into a tight 30-45s YouTube Short.\n// Drops off-niche noise (stocks, crypto, politics).\n//\n// TOP_N controls how many Short drafts get created per run. Change freely.\nconst TOP_N = 5;\n\nconst all = [];\nfor (const item of $input.all()) {\n  for (const c of (item.json.candidates || [])) all.push(c);\n}\n\n// Mentions an AI tool / product\nconst TOOL = /(\\bai\\b|chatgpt|\\bgpt\\b|claude|gemini|grok|midjourney|sora|perplexity|notion ?ai|zapier|n8n|copilot|\\bllm\\b|ai agent|prompt|automation|deepseek)/i;\n// Frames it as something teachable\nconst HOWTO = /(how to|tutorial|guide|step|use\\b|using|set ?up|build|create|automate|workflow|hack|trick|\\btip(s)?\\b|best |top \\d)/i;\n// Has a concrete proof number (\"7 AI tools\", \"in 2 minutes\", \"10x\")\nconst NUM = /(\\d+\\s?(ai\\s?)?tools?|\\d+\\s?%|in\\s?\\d+\\s?(min|minute|sec|second|hour|day)|\\btop\\s?\\d+\\b|\\d+x\\b)/i;\n// Off-niche -> hard penalty\nconst OFF = /(stock market|crypto|bitcoin|invest|trading|election|politic|nsfw|onlyfans)/i;\n\nfunction score(c) {\n  const t = (c.title || '').trim();\n  const blob = (t + ' ' + (c.summary || '')).toLowerCase();\n  const words = t.split(/\\s+/).filter(Boolean).length;\n  let s = 0;\n  if (words >= 3 && words <= 16) s += 2;   // collapses into a hook line\n  if (TOOL.test(blob)) s += 3;             // actually about an AI tool\n  if (HOWTO.test(blob)) s += 3;            // teachable / actionable angle\n  if (NUM.test(blob)) s += 2;              // has a concrete proof number\n  if (words <= 12) s += 1;                 // short enough for on-screen text\n  if (c.engagement > 1000) s += 1;         // already proven to travel\n  if (OFF.test(blob)) s -= 5;              // off-niche -> drop\n  return s;\n}\n\nconst seen = new Set();\nconst scored = all\n  .filter(c => c && c.title && c.title.length > 12)\n  .map(c => ({ ...c, reel_fit: score(c) }))\n  .filter(c => {\n    const key = c.title.toLowerCase().slice(0, 50);\n    if (seen.has(key)) return false;\n    seen.add(key);\n    return true;\n  })\n  .filter(c => c.reel_fit >= 7)\n  .sort((a, b) => b.reel_fit - a.reel_fit)\n  .slice(0, TOP_N);\n\nif (scored.length === 0) {\n  return [{ json: { skip: true, title: 'NO_AI_TOPICS' } }];\n}\nreturn scored.map(c => ({ json: c }));"
+      },
+      "id": "node_r11_score",
+      "name": "Code - Score AI-Fit & Pick Top",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 320]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.skip === true }}",
+              "value2": false
+            }
+          ]
+        }
+      },
+      "id": "node_r12_if",
+      "name": "IF - Has AI Topics?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1560, 320]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a faceless YouTube Shorts scriptwriter and art director for a Gen Z 'AI tools & how-to' channel. You turn a raw topic into a 30-45 second vertical YouTube Short that TEACHES the viewer one concrete, usable thing about AI tools — either how to use a specific tool, or the best tools for a specific task. The viewer must be able to act on it immediately. Style: clear, fast, practical, NO hype, NO emojis, neon-green energy. On-screen text is Anton uppercase, max 6 words per line. The post_caption is rendered AS a static tweet card on top of the reel video (caption never animates) — keep it short, tweet-shaped, scannable in 6 seconds. Output ONLY a valid JSON object, no markdown fences."
+            },
+            {
+              "role": "user",
+              "content": "=Raw candidate topic: {{ $json.title }}\nContext: {{ $json.summary }}\nSource: {{ $json.source }} ({{ $json.url }})\nAI-fit score: {{ $json.reel_fit }}\n\nProduce a JSON object with EXACTLY these keys:\n1. topic: a clean, sharpened how-to / best-tools topic (max 12 words)\n2. key_points: array of 3-5 short concrete takeaway strings the viewer learns\n3. enriched_context: 1-2 sentences of factual context about the tool(s), max 300 chars\n4. headline_line_1: UPPERCASE, max 5 words, white setup line\n5. headline_line_2: UPPERCASE, max 4 words, neon-green KEY tool name or number\n6. headline_line_3: UPPERCASE, max 5 words, white payoff line\n7. subheadline: lowercase, max 12 words, gray\n8. proof_number: the single hero stat, e.g. \"7 TOOLS\", \"IN 2 MIN\", \"10X FASTER\"\n9. proof_label: 2-4 words labelling that stat\n10. reel_script: exactly 5 punchy on-screen lines, newline-separated, max 6 words each, each line teaching a step or naming a tool\n11. template: \"montage_hook\" if the topic lists/showcases multiple tools, otherwise \"five_beat\" for a single how-to walkthrough\n12. voiceover_lines: array of 6 objects {id, start, text}. id is s1..s6. start times MUST be exactly 0.3, 4.3, 10.3, 16.3, 22.3, 27.3. text is one spoken sentence per beat aligned to a 30s timeline that actually teaches the steps; beat 6 is the CTA (subscribe / follow for more AI tips)\n13. post_caption: a SHORT TWEET-SHAPED caption that will be rendered statically as a Twitter-style card pinned on top of the reel video. EXACT FORMAT: 6 to 8 short lines, total under 110 words, plain prose, NO hashtags, NO emojis, no leading hook in caps, no CTA. The FINAL line MUST be exactly: We only post the best AI tools & how-tos\n\nReturn ONLY the JSON object."
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.8,
+          "response_format": { "type": "json_object" }
+        }
+      },
+      "id": "node_r13_openai",
+      "name": "OpenAI - Build Short Draft",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [1820, 240]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the OpenAI JSON and map it onto the Reels tab schema.\nlet raw;\ntry {\n  let content = $input.item.json.message?.content || $input.item.json.choices?.[0]?.message?.content || '{}';\n  content = content.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/, '').trim();\n  raw = JSON.parse(content);\n} catch (e) {\n  throw new Error('Failed to parse OpenAI JSON: ' + e.message);\n}\n\nconst src = $('Code - Score AI-Fit & Pick Top').item.json;\nconst vo = Array.isArray(raw.voiceover_lines) ? JSON.stringify(raw.voiceover_lines) : '[]';\n\nreturn {\n  Topic: raw.topic || src.title,\n  'Key Points': Array.isArray(raw.key_points) ? raw.key_points.join(' | ') : (raw.key_points || ''),\n  'Brand Tone': 'Gen Z AI-native energy. Practical, fast, no hype. Teaches young people how to actually use AI tools to work faster.',\n  'Enriched Context': (raw.enriched_context || src.summary || '').slice(0, 500),\n  'YouTube URL': src.source === 'youtube' ? src.url : '',\n  Status: 'Draft',\n  'Post Type': 'reel',\n  'Headline Line 1 (White)': (raw.headline_line_1 || '').toUpperCase(),\n  'Headline Line 2 (Neon Green)': (raw.headline_line_2 || '').toUpperCase(),\n  'Headline Line 3 (White)': (raw.headline_line_3 || '').toUpperCase(),\n  'Subheadline (Gray)': (raw.subheadline || ''),\n  'Key Stat': raw.proof_number || '',\n  'Reel Script': raw.reel_script || '',\n  'Reel Template': raw.template === 'montage_hook' ? 'montage_hook' : 'five_beat',\n  'Voiceover Lines (JSON)': vo,\n  'Post Caption': raw.post_caption || '',\n  'Reel Fit': src.reel_fit != null ? src.reel_fit : ''\n};"
+      },
+      "id": "node_r14_parse",
+      "name": "Code - Parse Short JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2080, 240]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "13AEU80ULx2Lxnq9SWDeSSFN7unfhr-x_mPyi37oz7O4",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Reels",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": ["Topic"]
+        },
+        "options": {}
+      },
+      "id": "node_r15_append",
+      "name": "Google Sheets - Append Short Draft",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [2340, 240]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Runs once for ALL appended rows -> builds a single summary email.\n// The next step in the lifecycle is the USER: open the Reels tab,\n// review/edit the Post Caption, then flip Status -> Ready. Workflow B\n// (publisher/workflows/n8n/tweet_card_reel_workflow.json) picks it up\n// automatically on the next poll cycle.\nconst rows = $input.all().map(i => i.json).filter(Boolean);\nconst count = rows.length;\nconst sheetUrl = 'https://docs.google.com/spreadsheets/d/13AEU80ULx2Lxnq9SWDeSSFN7unfhr-x_mPyi37oz7O4/edit';\n\nconst list = rows\n  .map((r, i) => `${i + 1}. ${r.Topic || '(untitled)'}  [${r['Reel Template'] || 'five_beat'}]`)\n  .join('\\n');\n\nconst subject = `${count} new AI Short draft${count === 1 ? '' : 's'} ready for review`;\nconst body = `Workflow A just added ${count} draft${count === 1 ? '' : 's'} to the Reels tab.\\n\\n${list}\\n\\nOpen the Sheet, edit the Post Caption if needed, then flip Status -> Ready:\\n${sheetUrl}\\n\\nWorkflow B will pick it up automatically and trigger the GitHub render job. You'll get the finished mp4 in Drive within ~5 minutes.`;\n\nreturn [{ json: { subject, body, count } }];"
+      },
+      "id": "node_r16_summary",
+      "name": "Code - Build Email Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2600, 240]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "88cnl88@gmail.com",
+        "subject": "={{ $json.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "node_r17_gmail",
+      "name": "Gmail - Notify Drafts Ready",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [2860, 240]
+    }
+  ],
+  "connections": {
+    "Schedule - Daily 6AM": {
+      "main": [[
+        { "node": "HTTP - Reddit AI Posts", "type": "main", "index": 0 },
+        { "node": "HTTP - YouTube Best AI Tools", "type": "main", "index": 0 },
+        { "node": "HTTP - YouTube AI How-To", "type": "main", "index": 0 },
+        { "node": "RSS - TechCrunch AI", "type": "main", "index": 0 }
+      ]]
+    },
+    "Manual Trigger - Run On Demand": {
+      "main": [[
+        { "node": "HTTP - Reddit AI Posts", "type": "main", "index": 0 },
+        { "node": "HTTP - YouTube Best AI Tools", "type": "main", "index": 0 },
+        { "node": "HTTP - YouTube AI How-To", "type": "main", "index": 0 },
+        { "node": "RSS - TechCrunch AI", "type": "main", "index": 0 }
+      ]]
+    },
+    "HTTP - Reddit AI Posts": {
+      "main": [[{ "node": "Code - Normalize Reddit", "type": "main", "index": 0 }]]
+    },
+    "HTTP - YouTube Best AI Tools": {
+      "main": [[{ "node": "Code - Normalize YouTube Tools", "type": "main", "index": 0 }]]
+    },
+    "HTTP - YouTube AI How-To": {
+      "main": [[{ "node": "Code - Normalize YouTube How-To", "type": "main", "index": 0 }]]
+    },
+    "RSS - TechCrunch AI": {
+      "main": [[{ "node": "Code - Normalize RSS", "type": "main", "index": 0 }]]
+    },
+    "Code - Normalize Reddit": {
+      "main": [[{ "node": "Merge - All Candidates", "type": "main", "index": 0 }]]
+    },
+    "Code - Normalize YouTube Tools": {
+      "main": [[{ "node": "Merge - All Candidates", "type": "main", "index": 1 }]]
+    },
+    "Code - Normalize YouTube How-To": {
+      "main": [[{ "node": "Merge - All Candidates", "type": "main", "index": 2 }]]
+    },
+    "Code - Normalize RSS": {
+      "main": [[{ "node": "Merge - All Candidates", "type": "main", "index": 3 }]]
+    },
+    "Merge - All Candidates": {
+      "main": [[{ "node": "Code - Score AI-Fit & Pick Top", "type": "main", "index": 0 }]]
+    },
+    "Code - Score AI-Fit & Pick Top": {
+      "main": [[{ "node": "IF - Has AI Topics?", "type": "main", "index": 0 }]]
+    },
+    "IF - Has AI Topics?": {
+      "main": [
+        [{ "node": "OpenAI - Build Short Draft", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "OpenAI - Build Short Draft": {
+      "main": [[{ "node": "Code - Parse Short JSON", "type": "main", "index": 0 }]]
+    },
+    "Code - Parse Short JSON": {
+      "main": [[{ "node": "Google Sheets - Append Short Draft", "type": "main", "index": 0 }]]
+    },
+    "Google Sheets - Append Short Draft": {
+      "main": [[{ "node": "Code - Build Email Summary", "type": "main", "index": 0 }]]
+    },
+    "Code - Build Email Summary": {
+      "main": [[{ "node": "Gmail - Notify Drafts Ready", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "instanceId": "72266cf7104999cf4ca85f63c2ab37a3e4761c531fdaf0c90ee0d01f4616b5e6"
+  }
+}

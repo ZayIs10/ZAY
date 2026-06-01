@@ -1,0 +1,42 @@
+{
+  "//": "Performance: stop VS Code from watching/indexing heavy folders. Removes lag on this project.",
+
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true,
+    "**/renders/work-*/**": true,
+    "**/renders/*.mp4": true,
+    "**/reels/assets/**": true,
+    "**/.fb_session/**": true,
+    "**/.playwright-mcp/**": true,
+    "**/logs/**": true,
+    "**/assets/images/generated/**": true,
+    "**/__pycache__/**": true,
+    "**/.tmp_hyperframes/**": true
+  },
+
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/renders": true,
+    "**/reels/assets": true,
+    "**/.fb_session": true,
+    "**/.playwright-mcp": true,
+    "**/logs": true,
+    "**/assets/images/generated": true,
+    "**/__pycache__": true,
+    "**/*.mp4": true,
+    "**/package-lock.json": true
+  },
+
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true,
+    "**/.fb_session": true,
+    "**/.playwright-mcp": true
+  },
+
+  "files.maxMemoryForLargeFilesMB": 64,
+  "editor.largeFileOptimizations": true,
+  "telemetry.telemetryLevel": "off"
+}

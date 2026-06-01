@@ -10,3 +10,4 @@ schedule==1.2.1
 feedparser==6.0.12
 pytrends==4.9.2
 duckduckgo-search==8.1.1
+yt-dlp>=2025.1.0

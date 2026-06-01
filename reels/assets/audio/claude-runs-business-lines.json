@@ -1,0 +1,27 @@
+[
+  {
+    "id": "s1",
+    "start": 0.6,
+    "text": "Anthropic just launched Claude for Small Business."
+  },
+  {
+    "id": "s2",
+    "start": 3.5,
+    "text": "You used five apps — QuickBooks, PayPal, HubSpot, Canva, DocuSign — every single month."
+  },
+  {
+    "id": "s3",
+    "start": 10.5,
+    "text": "Now it's one chat. Claude drafts invoices, chases payments, writes emails — and asks before sending."
+  },
+  {
+    "id": "s4",
+    "start": 20.5,
+    "text": "Fifteen workflows. Fifteen skills. Live since May 13, 2026."
+  },
+  {
+    "id": "s5",
+    "start": 27.2,
+    "text": "Would you trust it? Follow for more AI tools."
+  }
+]

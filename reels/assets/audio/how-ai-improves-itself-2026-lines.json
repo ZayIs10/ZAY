@@ -1,0 +1,27 @@
+[
+  {
+    "id": "s1",
+    "start": 0.8,
+    "text": "In twenty twenty-six, AI improves itself."
+  },
+  {
+    "id": "s2",
+    "start": 3.8,
+    "text": "For years, humans wrote every line of its code. That was the bottleneck."
+  },
+  {
+    "id": "s3",
+    "start": 10.8,
+    "text": "Now it trains its own successor. Each version designs the next, a loop with no human inside."
+  },
+  {
+    "id": "s4",
+    "start": 20.7,
+    "text": "Each cycle is faster than the last. Sixty percent gains, in weeks, not years."
+  },
+  {
+    "id": "s5",
+    "start": 27.6,
+    "text": "Follow for what comes next."
+  }
+]

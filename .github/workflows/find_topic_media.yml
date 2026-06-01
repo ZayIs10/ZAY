@@ -1,0 +1,60 @@
+name: Find Topic Media
+
+# Fired by n8n via repository_dispatch once a new row is appended to the
+# Reels tab of the Gen Z Capital Google Sheet. Runs media_finder.py
+# against every row with Media Status blank or "pending".
+#
+# n8n call shape:
+#   POST https://api.github.com/repos/<owner>/<repo>/dispatches
+#   { "event_type": "find-topic-media" }
+#
+# Also runnable manually from the GitHub Actions UI.
+
+on:
+  repository_dispatch:
+    types: [find-topic-media]
+  workflow_dispatch:
+
+jobs:
+  find-media:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      PEXELS_API_KEY:  ${{ secrets.PEXELS_API_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write .env
+        run: |
+          printf "GOOGLE_SHEET_ID=%s\n" "$GOOGLE_SHEET_ID" >> .env
+          printf "PEXELS_API_KEY=%s\n"  "$PEXELS_API_KEY"  >> .env
+
+      - name: Write Google service account
+        run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > google_service_account.json
+
+      - name: Run media finder
+        run: |
+          mkdir -p logs
+          python publisher/media_finder.py --all-pending 2>&1 \
+            | tee logs/media_finder_run.log
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: media-finder-logs-${{ github.run_id }}
+          path: logs/
+          retention-days: 7

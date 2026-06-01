@@ -1,0 +1,236 @@
+"""Build one @execute-style tweet-card reel for a Reels-tab row.
+
+This is the entry script the GitHub Actions render worker invokes
+(see .github/workflows/build_tweet_card_reel.yml). It can also be
+run locally for dry-runs.
+
+Pipeline:
+  1. Read the row from the Reels tab.
+  2. Validate Post Caption + Media Video URL + Media Image URL.
+  3. Download the source video (yt-dlp / HTTP).
+  4. Download the poster image.
+  5. Render the tweet-card PNG (publisher/tweet_card.py).
+  6. Composite the final mp4 (publisher/compositor.py).
+  7. Upload to Drive (reuse publisher/publish_reel.upload_to_drive).
+  8. Write Reel MP4 URL + Status="Ready to Post" back to the row.
+
+If anything fails: row Status is set to "Render Failed" with the
+error truncated into the Media Status cell for debugging.
+"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import os
+import re
+import sys
+import traceback
+from datetime import datetime, timezone
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from publisher.post_generator import SheetsReader  # noqa: E402
+from publisher.media_consumer import fetch_single_clip, fetch_image  # noqa: E402
+from publisher.tweet_card import render as render_card  # noqa: E402
+from publisher.compositor import build as composite_reel  # noqa: E402
+
+RENDERS_DIR = REPO_ROOT / "renders"
+TMP_DIR = REPO_ROOT / ".tmp" / "tweet_card_reel"
+LOGO_PATH = REPO_ROOT / "logo.png"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+log = logging.getLogger("tweet_card_reel")
+
+
+# ---------------------------------------------------------------------------
+
+def _slugify(text: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    return s[:40] or "reel"
+
+
+def _sheets_config() -> dict:
+    load_dotenv(REPO_ROOT / ".env")
+    sheet_id = os.getenv("GOOGLE_SHEET_ID")
+    if not sheet_id:
+        raise RuntimeError("GOOGLE_SHEET_ID is not set in .env")
+    return {
+        "google_sheets": {
+            "credentials_file": "google_service_account.json",
+            "spreadsheet_id": sheet_id,
+            "sheet_name": os.getenv("GOOGLE_SHEET_REELS_NAME", "Reels"),
+        }
+    }
+
+
+def _read_row_by_index(reader: SheetsReader, row_index: int) -> dict:
+    """Read a single row by 1-indexed sheet row number."""
+    all_values = reader.ws.get_all_values()
+    if row_index < 2 or row_index > len(all_values):
+        raise RuntimeError(f"Row {row_index} out of range")
+    headers = all_values[0]
+    raw = all_values[row_index - 1]
+    row = {headers[j]: raw[j] if j < len(raw) else "" for j in range(len(headers))}
+    row["_row_index"] = row_index
+    return row
+
+
+def _try_update(reader: SheetsReader, row_index: int, header: str, value: str) -> None:
+    """Best-effort cell update — log + skip if the column doesn't exist."""
+    try:
+        col = reader._col_index(header)
+        reader.ws.update_cell(row_index, col, value)
+    except (ValueError, IndexError) as exc:
+        log.warning("Could not update column %r: %s", header, exc)
+
+
+def _mark_failed(reader: SheetsReader, row_index: int, msg: str) -> None:
+    _try_update(reader, row_index, "Status", "Render Failed")
+    _try_update(reader, row_index, "Media Status", msg[:200])
+
+
+# ---------------------------------------------------------------------------
+
+def build_reel_for_row(row: dict) -> Path:
+    """Pure build step — no Sheet I/O. Returns the local mp4 path.
+
+    Kept separate from the sheet-update wrapper so it's straightforward
+    to invoke from a notebook / test against a hand-built row dict.
+    """
+    row_index = row["_row_index"]
+    topic = (row.get("Topic") or "").strip()
+    caption = (row.get("Post Caption") or "").strip()
+    video_url = (row.get("Media Video URL") or "").strip()
+    image_url = (row.get("Media Image URL") or "").strip()
+
+    missing = []
+    if not topic:
+        missing.append("Topic")
+    if not caption:
+        missing.append("Post Caption")
+    if not video_url:
+        missing.append("Media Video URL")
+    if not image_url:
+        missing.append("Media Image URL")
+    if missing:
+        raise RuntimeError(
+            f"Row {row_index} missing required fields: {', '.join(missing)}"
+        )
+
+    slug = _slugify(topic)
+    log.info("Row %d -> slug=%s", row_index, slug)
+
+    TMP_DIR.mkdir(parents=True, exist_ok=True)
+    RENDERS_DIR.mkdir(parents=True, exist_ok=True)
+
+    log.info("Downloading source video: %s", video_url)
+    source_video = fetch_single_clip(video_url, slug, max_seconds=60.0)
+
+    log.info("Downloading poster image: %s", image_url)
+    poster_rels = fetch_image(image_url, slug, count=1)
+    poster_path = REPO_ROOT / "assets" / "images" / "auto" / f"{slug}_auto.jpg"
+    if not poster_path.exists() and poster_rels:
+        # fetch_image returns paths relative to reels/index.html; resolve.
+        poster_path = (REPO_ROOT / "reels" / poster_rels[0]).resolve()
+
+    card_png = TMP_DIR / f"{slug}_card.png"
+    log.info("Rendering tweet card -> %s", card_png.name)
+    render_card(
+        caption,
+        handle="@genzcapital",
+        display_name="Gen Z Capital",
+        avatar_path=LOGO_PATH,
+        out_path=card_png,
+    )
+
+    out_mp4 = RENDERS_DIR / f"{slug}-tweet.mp4"
+    log.info("Compositing reel -> %s", out_mp4.name)
+    composite_reel(
+        card_png, source_video, poster_path, out_mp4,
+        preview_seconds=1.0,
+        max_seconds=60.0,
+    )
+
+    if not out_mp4.exists() or out_mp4.stat().st_size == 0:
+        raise RuntimeError(f"Composite produced empty file: {out_mp4}")
+
+    log.info("Reel built: %s (%.1f MB)", out_mp4, out_mp4.stat().st_size / 1e6)
+    return out_mp4
+
+
+def run(row_index: int | None, *, dry_run: bool) -> int:
+    config = _sheets_config()
+    reader = SheetsReader(config)
+
+    if row_index is None:
+        row = reader.get_next_ready_row()
+        if row is None:
+            log.info("No row with Status=Ready. Nothing to do.")
+            return 0
+        row_index = row["_row_index"]
+    else:
+        row = _read_row_by_index(reader, row_index)
+
+    log.info("Processing row %d: %r", row_index, row.get("Topic", "(no topic)"))
+
+    try:
+        mp4_path = build_reel_for_row(row)
+    except Exception as exc:
+        log.error("Build failed: %s", exc)
+        log.debug(traceback.format_exc())
+        _mark_failed(reader, row_index, str(exc))
+        return 1
+
+    if dry_run:
+        log.info("DRY RUN: skipping Drive upload + Sheet update.")
+        log.info("Local file: %s", mp4_path)
+        return 0
+
+    # Late import so dry runs don't require googleapiclient / OAuth setup.
+    from publisher.publish_reel import upload_to_drive  # noqa: E402
+
+    try:
+        download_url = upload_to_drive(mp4_path)
+    except Exception as exc:
+        log.error("Drive upload failed: %s", exc)
+        log.debug(traceback.format_exc())
+        _mark_failed(reader, row_index, f"Drive upload: {exc}")
+        return 2
+
+    _try_update(reader, row_index, "Reel MP4 URL", download_url)
+    _try_update(
+        reader, row_index, "Media Found At",
+        datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    )
+    _try_update(reader, row_index, "Status", "Ready to Post")
+
+    log.info("Done. Row %d -> Status=Ready to Post, mp4=%s", row_index, download_url)
+    return 0
+
+
+# ---------------------------------------------------------------------------
+
+def main(argv: list[str]) -> int:
+    p = argparse.ArgumentParser(description=__doc__)
+    g = p.add_mutually_exclusive_group(required=True)
+    g.add_argument("--row", type=int, help="1-indexed sheet row to render")
+    g.add_argument("--next", action="store_true",
+                   help="Render the next Status=Ready row")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Build mp4 locally, skip Drive upload + Sheet update")
+    args = p.parse_args(argv)
+
+    return run(args.row if not args.next else None, dry_run=args.dry_run)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
