@@ -17,6 +17,7 @@ scripts/pexels_fetcher.py so the renderer sees identical-shape inputs.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -29,6 +30,24 @@ CLIP_DIR = REPO_ROOT / "reels" / "assets" / "clips"
 IMG_DIR = REPO_ROOT / "assets" / "images" / "auto"
 
 log = logging.getLogger("media_consumer")
+
+
+def _youtube_cookiefile() -> str | None:
+    """Locate a Netscape-format YouTube cookies file, if one is available.
+
+    YouTube bot-blocks datacenter IPs (e.g. GitHub Actions) with
+    "Sign in to confirm you're not a bot". Passing authenticated cookies
+    bypasses that. The CI workflow writes the YOUTUBE_COOKIES secret to a
+    file and points YOUTUBE_COOKIES_FILE at it; locally the default path
+    is used if it exists.
+    """
+    env_path = os.getenv("YOUTUBE_COOKIES_FILE", "").strip()
+    candidates = [env_path] if env_path else []
+    candidates.append(str(REPO_ROOT / "youtube_cookies.txt"))
+    for c in candidates:
+        if c and Path(c).exists() and Path(c).stat().st_size > 0:
+            return c
+    return None
 
 
 def _resolve_ffmpeg() -> str:
@@ -83,7 +102,23 @@ def _ytdlp_download(url: str, dest: Path) -> None:
         "quiet": True,
         "no_warnings": True,
         "merge_output_format": "mp4",
+        # Resilience against YouTube's bot checks. The android/web player
+        # clients avoid some sign-in walls even without cookies.
+        "retries": 5,
+        "fragment_retries": 5,
+        "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
     }
+
+    cookiefile = _youtube_cookiefile()
+    if cookiefile:
+        log.info("Using YouTube cookies: %s", cookiefile)
+        ydl_opts["cookiefile"] = cookiefile
+    else:
+        log.warning(
+            "No YouTube cookies file found — datacenter IPs (e.g. CI) may be "
+            "bot-blocked. Set the YOUTUBE_COOKIES secret to fix this."
+        )
+
     with YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
 

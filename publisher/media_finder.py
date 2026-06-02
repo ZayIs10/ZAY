@@ -44,6 +44,7 @@ from publisher.media_sources import (
     brand_detect,
     brand_official,
     google_images,
+    pexels,
     youtube,
 )
 from publisher.media_sources.scoring import pick_best
@@ -178,7 +179,11 @@ def discover_for_topic(topic: str, key_points: str) -> dict:
 
     tasks.extend([
         ("youtube_video", lambda: youtube.search_videos(query, limit=5)),
-        ("ddg_image",     lambda: google_images.search_images(query, limit=8)),
+        ("ddg_image", lambda: google_images.search_images(query, limit=8)),
+        # Pexels = copyright-safe, directly-downloadable mp4 fallback so a
+        # row never ends up with only un-downloadable URLs.
+        ("pexels_video", lambda: pexels.search_videos(query, limit=5)),
+        ("pexels_image", lambda: pexels.search_images(query, limit=5)),
     ])
 
     all_candidates: list[dict] = []

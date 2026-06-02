@@ -3,6 +3,7 @@
 google_service_account.json
 google_oauth_client.json
 google_drive_token.json
+youtube_cookies.txt
 
 # Generated output files
 *.jpg
