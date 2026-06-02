@@ -76,6 +76,7 @@ jobs:
 
       - name: Build reel
         run: |
+          set -o pipefail   # fail the step if python fails, not just tee
           mkdir -p logs renders
           python publisher/tweet_card_reel.py --row "${{ steps.row.outputs.value }}" 2>&1 \
             | tee "logs/tweet_card_reel_row${{ steps.row.outputs.value }}.log"

@@ -47,6 +47,7 @@ jobs:
 
       - name: Run media finder
         run: |
+          set -o pipefail   # fail the step if python fails, not just tee
           mkdir -p logs
           python publisher/media_finder.py --all-pending 2>&1 \
             | tee logs/media_finder_run.log
