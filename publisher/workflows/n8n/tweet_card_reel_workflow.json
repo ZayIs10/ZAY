@@ -40,16 +40,10 @@
           "combinator": "and",
           "conditions": [
             {
-              "id": "cond_status_ready",
-              "leftValue": "={{ $json['Status'] }}",
-              "rightValue": "Ready",
+              "id": "cond_status_ready_to_run",
+              "leftValue": "={{ ($json['Status'] || '').toString().trim().toLowerCase() }}",
+              "rightValue": "ready to run",
               "operator": { "type": "string", "operation": "equals" }
-            },
-            {
-              "id": "cond_no_media",
-              "leftValue": "={{ $json['Media Video URL'] || '' }}",
-              "rightValue": "",
-              "operator": { "type": "string", "operation": "empty" }
             },
             {
               "id": "cond_has_topic",
@@ -62,7 +56,7 @@
         "options": {}
       },
       "id": "node_b2_gate",
-      "name": "IF - Ready & Media Missing",
+      "name": "IF - Status is Ready to Run",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [480, 320]
@@ -85,6 +79,36 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [760, 320]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "13AEU80ULx2Lxnq9SWDeSSFN7unfhr-x_mPyi37oz7O4",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Reels",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": ["row_number"],
+          "value": {
+            "row_number": "={{ $json.row_number }}",
+            "Status": "Building"
+          }
+        },
+        "options": {}
+      },
+      "id": "node_b3b_claim",
+      "name": "Sheets - Claim (Building)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [900, 200],
+      "notes": "Loop guard: flip Status off 'Ready to Run' to 'Building' the moment we start, so the every-minute trigger can't fire a duplicate build while this one runs. The GitHub render worker sets it to 'Ready to Post' when done."
     },
     {
       "parameters": {
@@ -342,15 +366,18 @@
   ],
   "connections": {
     "Google Sheets Trigger - Row Updated": {
-      "main": [[{ "node": "IF - Ready & Media Missing", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "IF - Status is Ready to Run", "type": "main", "index": 0 }]]
     },
-    "IF - Ready & Media Missing": {
+    "IF - Status is Ready to Run": {
       "main": [
         [{ "node": "Set - Extract Row Fields", "type": "main", "index": 0 }],
         []
       ]
     },
     "Set - Extract Row Fields": {
+      "main": [[{ "node": "Sheets - Claim (Building)", "type": "main", "index": 0 }]]
+    },
+    "Sheets - Claim (Building)": {
       "main": [[{ "node": "Code - Detect Brand", "type": "main", "index": 0 }]]
     },
     "Code - Detect Brand": {

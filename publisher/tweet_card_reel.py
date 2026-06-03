@@ -84,6 +84,32 @@ def _read_row_by_index(reader: SheetsReader, row_index: int) -> dict:
     return row
 
 
+# "Ready to Run" is the explicit GO signal the user sets. It is deliberately
+# DIFFERENT from the terminal "Ready to Post" so the build never re-triggers
+# itself into an infinite loop. Matched case-insensitively + trimmed because
+# the value is hand-typed in the sheet ("ready to run ", "Ready to Run", ...).
+TRIGGER_STATUS = "ready to run"
+CLAIM_STATUS = "Building"          # set immediately so a re-poll won't double-fire
+DONE_STATUS = "Ready to Post"      # terminal: reel is in Drive, do NOT re-build
+
+
+def _find_ready_to_run_row(reader: SheetsReader) -> dict | None:
+    """Return the first row whose Status is 'Ready to Run' (trimmed,
+    case-insensitive) AND has a Topic, or None."""
+    all_values = reader.ws.get_all_values()
+    if not all_values:
+        return None
+    headers = all_values[0]
+    for i, raw in enumerate(all_values[1:], start=2):
+        row = {headers[j]: raw[j] if j < len(raw) else "" for j in range(len(headers))}
+        status = str(row.get("Status", "")).strip().lower()
+        topic = str(row.get("Topic", "")).strip()
+        if status == TRIGGER_STATUS and topic:
+            row["_row_index"] = i
+            return row
+    return None
+
+
 def _try_update(reader: SheetsReader, row_index: int, header: str, value: str) -> None:
     """Best-effort cell update — log + skip if the column doesn't exist."""
     try:
@@ -172,15 +198,20 @@ def run(row_index: int | None, *, dry_run: bool) -> int:
     reader = SheetsReader(config)
 
     if row_index is None:
-        row = reader.get_next_ready_row()
+        row = _find_ready_to_run_row(reader)
         if row is None:
-            log.info("No row with Status=Ready. Nothing to do.")
+            log.info("No row with Status='Ready to Run' (+Topic). Nothing to do.")
             return 0
         row_index = row["_row_index"]
     else:
         row = _read_row_by_index(reader, row_index)
 
     log.info("Processing row %d: %r", row_index, row.get("Topic", "(no topic)"))
+
+    # Claim the row IMMEDIATELY so a re-poll (n8n fires every minute) sees
+    # "Building", not "Ready to Run", and won't kick off a duplicate render.
+    if not dry_run:
+        _try_update(reader, row_index, "Status", CLAIM_STATUS)
 
     try:
         mp4_path = build_reel_for_row(row)
@@ -211,9 +242,9 @@ def run(row_index: int | None, *, dry_run: bool) -> int:
         reader, row_index, "Media Found At",
         datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     )
-    _try_update(reader, row_index, "Status", "Ready to Post")
+    _try_update(reader, row_index, "Status", DONE_STATUS)
 
-    log.info("Done. Row %d -> Status=Ready to Post, mp4=%s", row_index, download_url)
+    log.info("Done. Row %d -> Status=%s, mp4=%s", row_index, DONE_STATUS, download_url)
     return 0
 
 
@@ -224,7 +255,7 @@ def main(argv: list[str]) -> int:
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument("--row", type=int, help="1-indexed sheet row to render")
     g.add_argument("--next", action="store_true",
-                   help="Render the next Status=Ready row")
+                   help="Render the next Status='Ready to Run' row")
     p.add_argument("--dry-run", action="store_true",
                    help="Build mp4 locally, skip Drive upload + Sheet update")
     args = p.parse_args(argv)
