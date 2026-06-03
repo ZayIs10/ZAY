@@ -6,8 +6,11 @@ Stacks three layers onto a 1080x1920 black canvas:
      followed by the source video, both scaled+center-cropped.
   3. Tweet-card PNG at (40, 60), shown the full duration (static).
 
-Audio is dropped (-an). Total duration = preview_seconds + source video
-duration, capped at max_seconds (Instagram Reels limit).
+Audio: if the source video HAS an audio track, the reel keeps it —
+preceded by `preview_seconds` of silence so it lines up with the poster
+intro. If the source has no audio, the reel is silent (-an). Total
+duration = preview_seconds + source video duration, capped at
+max_seconds (Instagram Reels limit).
 
 This is the only place in the codebase that drives ffmpeg with a
 multi-input filter_complex. Keep the graph here, not inline in
@@ -82,6 +85,37 @@ def probe_duration(path: Path) -> float:
     return dur
 
 
+def _has_audio_via_ffmpeg(path: Path) -> bool:
+    """Fallback audio-stream detection: look for an 'Audio:' stream line in
+    `ffmpeg -i` stderr (used when ffprobe isn't installed)."""
+    cmd = [_resolve_ffmpeg(), "-hide_banner", "-i", str(path)]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    return "Audio:" in (proc.stderr or "")
+
+
+def has_audio(path: Path) -> bool:
+    """True if `path` contains at least one audio stream. Prefers ffprobe;
+    falls back to scanning `ffmpeg -i` stderr."""
+    probe = _resolve_ffprobe()
+    cmd = [
+        probe, "-v", "error",
+        "-select_streams", "a",
+        "-show_entries", "stream=index",
+        "-of", "json", str(path),
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+    except FileNotFoundError:
+        return _has_audio_via_ffmpeg(path)
+    if proc.returncode != 0:
+        return _has_audio_via_ffmpeg(path)
+    try:
+        data = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError:
+        return _has_audio_via_ffmpeg(path)
+    return len(data.get("streams", [])) > 0
+
+
 def build(
     card_png: Path,
     source_video: Path,
@@ -109,7 +143,10 @@ def build(
         f"crop={VIDEO_W}:{VIDEO_H},setsar=1"
     )
 
-    filter_complex = (
+    keep_audio = has_audio(source_video)
+    log.info("Source audio: %s", "present -> kept" if keep_audio else "none -> silent")
+
+    video_graph = (
         # Inputs:
         #   [0] color canvas, [1] poster image (looped),
         #   [2] source video (capped), [3] tweet-card PNG.
@@ -133,13 +170,41 @@ def build(
         "-i", str(source_video),
         # 3: tweet card PNG.
         "-i", str(card_png),
-        "-filter_complex", filter_complex,
-        "-map", "[v]",
+    ]
+
+    if keep_audio:
+        # 4: silence to cover the poster intro so the source audio starts
+        # exactly when the clip starts playing.
+        cmd += [
+            "-f", "lavfi", "-t", f"{preview_seconds:.2f}",
+            "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+        ]
+        audio_graph = (
+            f";[4:a]atrim=duration={preview_seconds:.2f},asetpts=PTS-STARTPTS[sil];"
+            f"[2:a]atrim=duration={src_play_dur:.2f},asetpts=PTS-STARTPTS[srca];"
+            f"[sil][srca]concat=n=2:v=0:a=1[a]"
+        )
+        cmd += [
+            "-filter_complex", video_graph + audio_graph,
+            "-map", "[v]", "-map", "[a]",
+        ]
+    else:
+        cmd += [
+            "-filter_complex", video_graph,
+            "-map", "[v]",
+        ]
+
+    cmd += [
         "-c:v", "libx264", "-preset", "fast", "-crf", "20",
         "-pix_fmt", "yuv420p",
         "-r", "30", "-g", "30", "-keyint_min", "30",
         "-movflags", "+faststart",
-        "-an",
+    ]
+    if keep_audio:
+        cmd += ["-c:a", "aac", "-b:a", "128k"]
+    else:
+        cmd += ["-an"]
+    cmd += [
         "-t", f"{total_dur:.2f}",
         str(out_path),
     ]
