@@ -107,7 +107,18 @@ def _ytdlp_download(url: str, dest: Path) -> None:
         "merge_output_format": "mp4",
         "retries": 5,
         "fragment_retries": 5,
+        # YouTube now gates real format URLs behind a JS "n challenge".
+        # yt-dlp solves it with a JS runtime (Deno) plus the EJS solver
+        # scripts fetched from GitHub. Without this, only storyboard images
+        # are offered -> "Requested format is not available".
+        "remote_components": ["ejs:github"],
     }
+
+    ff = _resolve_ffmpeg()
+    if ff and ff != "ffmpeg":
+        # yt-dlp merges video+audio with ffmpeg; point it at the resolved
+        # binary so local runs (no ffmpeg on PATH) work like CI does.
+        ydl_opts["ffmpeg_location"] = ff
 
     cookiefile = _youtube_cookiefile()
     if cookiefile:

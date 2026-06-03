@@ -46,6 +46,17 @@ jobs:
       - name: Install ffmpeg
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
+      - name: Install Deno (JS runtime for yt-dlp YouTube challenge solver)
+        # YouTube gates real format URLs behind a JS "n challenge" that
+        # yt-dlp solves via a JS runtime + the EJS solver. Without Deno,
+        # only storyboard images are available and the build fails.
+        run: |
+          curl -fsSL https://deno.land/install.sh | sh -s -- -y
+          echo "$HOME/.deno/bin" >> "$GITHUB_PATH"
+
+      - name: Verify Deno
+        run: deno --version
+
       - name: Install Python dependencies
         run: |
           pip install -r requirements.txt
