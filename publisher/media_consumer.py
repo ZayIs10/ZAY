@@ -97,16 +97,16 @@ def _ytdlp_download(url: str, dest: Path) -> None:
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     ydl_opts = {
-        "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        # Permissive: any video+audio, merged to mp4. The strict ext=mp4
+        # filter could leave "Requested format is not available" when the
+        # chosen player client only exposes webm/av1 streams.
+        "format": "bv*+ba/b",
         "outtmpl": str(dest),
         "quiet": True,
         "no_warnings": True,
         "merge_output_format": "mp4",
-        # Resilience against YouTube's bot checks. The android/web player
-        # clients avoid some sign-in walls even without cookies.
         "retries": 5,
         "fragment_retries": 5,
-        "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
     }
 
     cookiefile = _youtube_cookiefile()
