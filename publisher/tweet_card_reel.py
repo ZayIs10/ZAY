@@ -124,6 +124,38 @@ def _mark_failed(reader: SheetsReader, row_index: int, msg: str) -> None:
     _try_update(reader, row_index, "Media Status", msg[:200])
 
 
+def _ensure_media(reader: SheetsReader, row_index: int, row: dict,
+                  *, dry_run: bool) -> dict:
+    """If the row is missing a video/image URL, discover them (keyless) and
+    write them back, then return the refreshed row. No-op on failure — the
+    caller still validates and will mark the row failed if media is absent."""
+    topic = (row.get("Topic") or "").strip()
+    if not topic:
+        return row
+    log.info("Media missing on row %d — running keyless finder...", row_index)
+    try:
+        from publisher import media_finder  # noqa: E402
+        result = media_finder.discover_for_topic(
+            topic, row.get("Key Points") or "",
+        )
+        if not dry_run:
+            media_finder.write_row_media(reader.ws, row_index, result)
+            row = _read_row_by_index(reader, row_index)
+        else:  # dry run: graft winners onto the in-memory row only
+            v = (result["video"]["winner"] or {}).get("media_url", "")
+            i = (result["image"]["winner"] or {}).get("media_url", "")
+            if v:
+                row["Media Video URL"] = v
+            if i:
+                row["Media Image URL"] = i
+        log.info("Media found -> video=%s image=%s",
+                 bool(row.get("Media Video URL", "").strip()),
+                 bool(row.get("Media Image URL", "").strip()))
+    except Exception as exc:  # noqa: BLE001 — finder is best-effort
+        log.warning("Auto media-find failed on row %d: %s", row_index, exc)
+    return row
+
+
 # ---------------------------------------------------------------------------
 
 def build_reel_for_row(row: dict) -> Path:
@@ -212,6 +244,14 @@ def run(row_index: int | None, *, dry_run: bool) -> int:
     # "Building", not "Ready to Run", and won't kick off a duplicate render.
     if not dry_run:
         _try_update(reader, row_index, "Status", CLAIM_STATUS)
+
+    # Self-serve media: if the row has a Topic but no Media Video/Image URL,
+    # find it here (keyless: yt-dlp + Pexels + brand scrape). This means a row
+    # only needs Topic + "Ready to Run" — no dependency on n8n's YouTube-API
+    # search, which is the part that keeps breaking ($env block, Merge config).
+    if not (row.get("Media Video URL", "").strip()
+            and row.get("Media Image URL", "").strip()):
+        row = _ensure_media(reader, row_index, row, dry_run=dry_run)
 
     try:
         mp4_path = build_reel_for_row(row)
