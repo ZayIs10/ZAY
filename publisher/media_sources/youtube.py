@@ -14,9 +14,31 @@ Limitations:
 from __future__ import annotations
 
 import logging
+import os
+from pathlib import Path
 from typing import Any
 
 log = logging.getLogger("media_sources.youtube")
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _youtube_cookiefile() -> str | None:
+    """Locate a Netscape-format YouTube cookies file, if available.
+
+    YouTube bot-blocks datacenter IPs (e.g. GitHub Actions) with "Sign in
+    to confirm you're not a bot" — and that block hits the SEARCH scrape too,
+    not just downloads, so `ytsearch` returns 0 results in CI without cookies.
+    Mirrors media_consumer._youtube_cookiefile (kept local to avoid importing
+    the heavier media_consumer module from a lightweight search source).
+    """
+    env_path = os.getenv("YOUTUBE_COOKIES_FILE", "").strip()
+    candidates = [env_path] if env_path else []
+    candidates.append(str(_REPO_ROOT / "youtube_cookies.txt"))
+    for c in candidates:
+        if c and Path(c).exists() and Path(c).stat().st_size > 0:
+            return c
+    return None
 
 
 def _import_ytdlp():
@@ -70,6 +92,21 @@ def search_videos(
         "noplaylist": True,
         "default_search": "ytsearch",
     }
+
+    # Same anti-bot-block treatment the download path uses: authenticated
+    # cookies + the EJS challenge solver. Without cookies, YouTube returns
+    # 0 search results from datacenter IPs (GitHub Actions), which silently
+    # left rows with no video and failed the build.
+    cookiefile = _youtube_cookiefile()
+    if cookiefile:
+        ydl_opts["cookiefile"] = cookiefile
+    else:
+        log.warning(
+            "No YouTube cookies file found — search may return 0 results from "
+            "datacenter IPs (e.g. CI). Set the YOUTUBE_COOKIES secret to fix."
+        )
+    ydl_opts["remote_components"] = ["ejs:github"]
+
     YoutubeDL = _import_ytdlp()
 
     search_url = f"ytsearch{limit}:{query}"
