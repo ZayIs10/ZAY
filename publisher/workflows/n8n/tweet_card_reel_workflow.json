@@ -27,7 +27,7 @@
       "name": "Google Sheets Trigger - Row Updated",
       "type": "n8n-nodes-base.googleSheetsTrigger",
       "typeVersion": 1,
-      "position": [200, 320]
+      "position": [220, 300]
     },
     {
       "parameters": {
@@ -59,7 +59,8 @@
       "name": "IF - Status is Ready to Run",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [480, 320]
+      "position": [500, 300],
+      "notes": "Only fires when a row's Status == 'Ready to Run' (trimmed, case-insensitive) AND it has a Topic. 'Ready to Run' is the single GO signal; it is deliberately different from the terminal 'Ready to Post' so this every-minute trigger can never re-fire a finished reel into a loop."
     },
     {
       "parameters": {
@@ -67,9 +68,7 @@
           "assignments": [
             { "id": "a0", "name": "row_number", "value": "={{ $json.row_number || $json.__row || $itemIndex + 2 }}", "type": "number" },
             { "id": "a1", "name": "row_index", "value": "={{ $json.row_number || $json.__row || $itemIndex + 2 }}", "type": "string" },
-            { "id": "a2", "name": "topic", "value": "={{ ($json['Topic'] || '').toString().trim() }}", "type": "string" },
-            { "id": "a3", "name": "post_caption", "value": "={{ ($json['Post Caption'] || '').toString().trim() }}", "type": "string" },
-            { "id": "a4", "name": "youtube_url", "value": "={{ ($json['YouTube URL'] || '').toString().trim() }}", "type": "string" }
+            { "id": "a2", "name": "topic", "value": "={{ ($json['Topic'] || '').toString().trim() }}", "type": "string" }
           ]
         },
         "options": {}
@@ -78,7 +77,8 @@
       "name": "Set - Extract Row Fields",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [760, 320]
+      "position": [760, 300],
+      "notes": "Pull the sheet row number (1-indexed) so the build worker knows which row to render. The Topic is carried only for the failure-email and logs; the Python build re-reads everything it needs from the sheet itself."
     },
     {
       "parameters": {
@@ -107,220 +107,8 @@
       "name": "Sheets - Claim (Building)",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.4,
-      "position": [900, 200],
-      "notes": "Loop guard: flip Status off 'Ready to Run' to 'Building' the moment we start, so the every-minute trigger can't fire a duplicate build while this one runs. The GitHub render worker sets it to 'Ready to Post' when done."
-    },
-    {
-      "parameters": {
-        "jsCode": "// Detect which AI brand the topic mentions and return its official\n// YouTube channel + blog page. Mirrors publisher/media_sources/brand_detect.py\n// — keep these two in sync when adding a new brand.\nconst topic = ($json.topic || '').toLowerCase();\nconst BRANDS = [\n  { key: 'anthropic',   re: /(anthropic|claude)/,            channel_id: 'UCrDwWp7EBBv4NwvScIpBDOA', channel_handle: '@AnthropicAI',   blog: 'https://www.anthropic.com/news' },\n  { key: 'openai',      re: /(openai|chatgpt|\\bgpt[\\- ]?\\d|sora|dall[- ]?e)/, channel_id: 'UCXZCJLdBC09xxGZ6gcdrc6A', channel_handle: '@OpenAI', blog: 'https://openai.com/news' },\n  { key: 'google',      re: /(gemini|google ai|deepmind|bard)/, channel_id: 'UCK8sQmJBp8GCxrOtXWBpyEA', channel_handle: '@Google', blog: 'https://blog.google/technology/ai/' },\n  { key: 'microsoft',   re: /(copilot|microsoft ai|azure ai)/,  channel_id: 'UCQ-VqzfFLb9Z3wQzM2xKqHA', channel_handle: '@Microsoft', blog: 'https://blogs.microsoft.com/ai/' },\n  { key: 'meta',        re: /(\\bmeta ai\\b|\\bllama\\b)/,           channel_id: 'UCbKWv2x9t6u8yZoB3KcPtnw', channel_handle: '@Meta',   blog: 'https://ai.meta.com/blog/' },\n  { key: 'perplexity',  re: /(perplexity)/,                     channel_id: 'UC4_K2y4ZS8btnXyUDx48ItA', channel_handle: '@Perplexity', blog: 'https://www.perplexity.ai/hub/blog' },\n  { key: 'notion',      re: /(notion ai|notion\\.so)/,           channel_id: 'UCQ1xLP1Wd5p_0lD0NM7lwgQ', channel_handle: '@notion', blog: 'https://www.notion.so/blog' },\n  { key: 'zapier',      re: /(zapier)/,                         channel_id: 'UCu6oMxOTwcSAtJVUyzL05dQ', channel_handle: '@zapier', blog: 'https://zapier.com/blog/' },\n  { key: 'n8n',         re: /(\\bn8n\\b)/,                        channel_id: 'UCqAuOd3iZ_KFlbWeS_3Q1Mw', channel_handle: '@n8n-io',  blog: 'https://blog.n8n.io/' }\n];\nfor (const b of BRANDS) {\n  if (b.re.test(topic)) {\n    return [{ json: { ...$json, brand: b.key, brand_channel_id: b.channel_id, brand_channel_handle: b.channel_handle, brand_blog: b.blog } }];\n  }\n}\nreturn [{ json: { ...$json, brand: '', brand_channel_id: '', brand_channel_handle: '', brand_blog: '' } }];"
-      },
-      "id": "node_b4_detect_brand",
-      "name": "Code - Detect Brand",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [1020, 320]
-    },
-    {
-      "parameters": {
-        "method": "GET",
-        "url": "https://www.googleapis.com/youtube/v3/search",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            { "name": "part", "value": "snippet" },
-            { "name": "type", "value": "video" },
-            { "name": "order", "value": "relevance" },
-            { "name": "maxResults", "value": "5" },
-            { "name": "channelId", "value": "={{ $json.brand_channel_id }}" },
-            { "name": "q", "value": "={{ $json.topic }}" },
-            { "name": "key", "value": "={{ $env.YOUTUBE_API_KEY }}" }
-          ]
-        },
-        "options": {}
-      },
-      "id": "node_b5a_yt_official",
-      "name": "HTTP - YouTube Official Channel",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.1,
-      "position": [1320, 180],
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "method": "GET",
-        "url": "https://www.googleapis.com/youtube/v3/search",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            { "name": "part", "value": "snippet" },
-            { "name": "type", "value": "video" },
-            { "name": "order", "value": "relevance" },
-            { "name": "maxResults", "value": "5" },
-            { "name": "q", "value": "={{ $json.topic }}" },
-            { "name": "key", "value": "={{ $env.YOUTUBE_API_KEY }}" }
-          ]
-        },
-        "options": {}
-      },
-      "id": "node_b5b_yt_general",
-      "name": "HTTP - YouTube General Search",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.1,
-      "position": [1320, 320],
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "method": "GET",
-        "url": "={{ $json.brand_blog }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            { "name": "User-Agent", "value": "Mozilla/5.0 (compatible; GenZCapitalBot/1.0)" }
-          ]
-        },
-        "options": {
-          "response": {
-            "response": { "responseFormat": "text" }
-          }
-        }
-      },
-      "id": "node_b5c_blog",
-      "name": "HTTP - Brand Blog (og:image)",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.1,
-      "position": [1320, 460],
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "method": "GET",
-        "url": "=https://duckduckgo.com/?q={{ encodeURIComponent($json.topic) }}&iax=images&ia=images&format=json",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            { "name": "User-Agent", "value": "Mozilla/5.0 (compatible; GenZCapitalBot/1.0)" }
-          ]
-        },
-        "options": {
-          "response": {
-            "response": { "responseFormat": "text" }
-          }
-        }
-      },
-      "id": "node_b5d_ddg_image",
-      "name": "HTTP - DuckDuckGo Image",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.1,
-      "position": [1320, 600],
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "jsCode": "// Stack candidates from all four search sources, score, pick best\n// video URL + best preview-image URL. Mirrors the scoring logic in\n// publisher/media_sources/scoring.py at a high level.\n//\n// Input shape: this Code node sits BEHIND a Merge node so $input.all()\n// returns one item per branch.\n//\n// Candidates carry a `source` tag so downstream knows where they came\n// from (we boost official-channel results +5).\n\nfunction pickFirst(items, predicate) {\n  for (const it of items) {\n    const v = predicate(it);\n    if (v) return v;\n  }\n  return '';\n}\n\nconst items = $input.all();\nlet ytOfficial = null, ytGeneral = null, blog = null, ddg = null;\nfor (const it of items) {\n  const j = it.json || {};\n  // Distinguish branches by the labels we set on the prior node.\n  if (j._branch === 'yt_official') ytOfficial = j;\n  else if (j._branch === 'yt_general') ytGeneral = j;\n  else if (j._branch === 'blog')  blog  = j;\n  else if (j._branch === 'ddg')   ddg   = j;\n}\n// If the labels weren't set (n8n routing varies), fall back to positional.\nif (!ytOfficial && items[0]) ytOfficial = items[0].json;\nif (!ytGeneral  && items[1]) ytGeneral  = items[1].json;\nif (!blog       && items[2]) blog       = items[2].json;\nif (!ddg        && items[3]) ddg        = items[3].json;\n\n// --- video candidates ---\nlet videoUrl = '', videoSource = '';\nconst officialItems = (ytOfficial && ytOfficial.items) || [];\nif (officialItems.length && officialItems[0].id && officialItems[0].id.videoId) {\n  videoUrl = `https://www.youtube.com/watch?v=${officialItems[0].id.videoId}`;\n  videoSource = 'youtube_official';\n}\nif (!videoUrl) {\n  const generalItems = (ytGeneral && ytGeneral.items) || [];\n  for (const it of generalItems) {\n    if (it.id && it.id.videoId) {\n      videoUrl = `https://www.youtube.com/watch?v=${it.id.videoId}`;\n      videoSource = 'youtube_general';\n      break;\n    }\n  }\n}\n\n// --- image candidates ---\nlet imageUrl = '';\nconst html = (blog && blog.data) || (blog && blog.body) || '';\nif (typeof html === 'string' && html.length) {\n  const m = html.match(/<meta[^>]+property=[\"']og:image[\"'][^>]+content=[\"']([^\"']+)[\"']/i)\n         || html.match(/<meta[^>]+content=[\"']([^\"']+)[\"'][^>]+property=[\"']og:image[\"']/i);\n  if (m) imageUrl = m[1];\n}\nif (!imageUrl) {\n  // DDG image fallback — its public JSON-ish endpoint embeds image urls.\n  const ddgHtml = (ddg && ddg.data) || (ddg && ddg.body) || '';\n  if (typeof ddgHtml === 'string') {\n    const m = ddgHtml.match(/\"image\":\\s*\"(https:[^\"]+)\"/);\n    if (m) imageUrl = m[1].replace(/\\\\\\//g, '/');\n  }\n}\n// As a last resort, take the YouTube video's thumbnail (always exists).\nif (!imageUrl && officialItems[0] && officialItems[0].snippet) {\n  imageUrl = (officialItems[0].snippet.thumbnails && officialItems[0].snippet.thumbnails.high && officialItems[0].snippet.thumbnails.high.url) || '';\n}\nif (!imageUrl) {\n  const g = (ytGeneral && ytGeneral.items) || [];\n  if (g[0] && g[0].snippet && g[0].snippet.thumbnails && g[0].snippet.thumbnails.high) {\n    imageUrl = g[0].snippet.thumbnails.high.url;\n  }\n}\n\nconst base = $('Set - Extract Row Fields').first().json;\nreturn [{\n  json: {\n    ...base,\n    media_video_url: videoUrl,\n    media_image_url: imageUrl,\n    media_source: videoSource,\n    media_status: videoUrl ? 'Found' : 'No source',\n    media_found_at: new Date().toISOString()\n  }\n}];"
-      },
-      "id": "node_b6_score",
-      "name": "Code - Score & Pick Best",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [1820, 320]
-    },
-    {
-      "parameters": {
-        "mode": "combine",
-        "combinationMode": "mergeByPosition",
-        "numberInputs": 4
-      },
-      "id": "node_b6m_merge",
-      "name": "Merge - All Sources",
-      "type": "n8n-nodes-base.merge",
-      "typeVersion": 3,
-      "position": [1600, 320]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": { "caseSensitive": true, "typeValidation": "loose" },
-          "combinator": "and",
-          "conditions": [
-            {
-              "id": "cond_has_video",
-              "leftValue": "={{ $json.media_video_url }}",
-              "rightValue": "",
-              "operator": { "type": "string", "operation": "notEmpty" }
-            }
-          ]
-        },
-        "options": {}
-      },
-      "id": "node_b7_has_video",
-      "name": "IF - Has Video URL?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
-      "position": [2080, 320]
-    },
-    {
-      "parameters": {
-        "operation": "update",
-        "documentId": {
-          "__rl": true,
-          "value": "13AEU80ULx2Lxnq9SWDeSSFN7unfhr-x_mPyi37oz7O4",
-          "mode": "id"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": "Reels",
-          "mode": "name"
-        },
-        "columns": {
-          "mappingMode": "defineBelow",
-          "matchingColumns": ["row_number"],
-          "value": {
-            "row_number": "={{ $json.row_number }}",
-            "Status": "Skipped - no source",
-            "Media Status": "No video URL resolved by Workflow B"
-          }
-        },
-        "options": {}
-      },
-      "id": "node_b7a_skip",
-      "name": "Sheets - Mark Skipped",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.4,
-      "position": [2340, 460]
-    },
-    {
-      "parameters": {
-        "operation": "update",
-        "documentId": {
-          "__rl": true,
-          "value": "13AEU80ULx2Lxnq9SWDeSSFN7unfhr-x_mPyi37oz7O4",
-          "mode": "id"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": "Reels",
-          "mode": "name"
-        },
-        "columns": {
-          "mappingMode": "defineBelow",
-          "matchingColumns": ["row_number"],
-          "value": {
-            "row_number": "={{ $json.row_number }}",
-            "Media Video URL": "={{ $json.media_video_url }}",
-            "Media Image URL": "={{ $json.media_image_url }}",
-            "Media Source": "={{ $json.media_source }}",
-            "Media Status": "={{ $json.media_status }}",
-            "Media Found At": "={{ $json.media_found_at }}"
-          }
-        },
-        "options": {}
-      },
-      "id": "node_b8_write_media",
-      "name": "Sheets - Write Media URLs",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.4,
-      "position": [2340, 240]
+      "position": [1020, 300],
+      "notes": "Loop guard: flip Status off 'Ready to Run' to 'Building' the moment we start, so the every-minute trigger can't fire a duplicate build while this one runs. The GitHub render worker sets the final Status ('Ready to Post' on success, 'Skipped - No Video' if no real clip is found, 'Render Failed' on error)."
     },
     {
       "parameters": {
@@ -344,8 +132,9 @@
       "name": "HTTP - Trigger Render Worker",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [2620, 240],
-      "onError": "continueErrorOutput"
+      "position": [1300, 300],
+      "onError": "continueErrorOutput",
+      "notes": "Fire the build-tweet-card-reel GitHub Action via repository_dispatch. The cloud worker does EVERYTHING else: self-finds media (keyless yt-dlp + brand scrape, demo-footage-first), REQUIRES a real video clip (skips the post if none is found - no still), renders the reel, uploads to Drive, and writes the final Status + Reel MP4 URL back to this row. If GITHUB_REPO/GITHUB_PAT use $env and your server blocks $env, paste the literal repo ('owner/repo') and a 'Bearer <PAT>' token directly here instead."
     },
     {
       "parameters": {
@@ -354,14 +143,15 @@
         "sendTo": "88cnl88@gmail.com",
         "subject": "=Reel render dispatch failed (row {{ $json.row_index }})",
         "emailType": "text",
-        "message": "=The GitHub dispatch failed for row {{ $json.row_index }} (topic: {{ $json.topic }}). Check Workflow B execution log.",
+        "message": "=The GitHub dispatch failed for row {{ $json.row_index }} (topic: {{ $json.topic }}). Check Workflow B execution log. The row is left on 'Building' - reset it to 'Ready to Run' to retry.",
         "options": {}
       },
       "id": "node_b10_gmail_fail",
       "name": "Gmail - Notify Dispatch Failed",
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
-      "position": [2880, 380]
+      "position": [1580, 420],
+      "notes": "Only fires if the GitHub dispatch HTTP call itself errors (bad PAT, repo typo, GitHub down). A normal build that ends in 'Skipped - No Video' is NOT a dispatch failure and will not email."
     }
   ],
   "connections": {
@@ -378,41 +168,6 @@
       "main": [[{ "node": "Sheets - Claim (Building)", "type": "main", "index": 0 }]]
     },
     "Sheets - Claim (Building)": {
-      "main": [[{ "node": "Code - Detect Brand", "type": "main", "index": 0 }]]
-    },
-    "Code - Detect Brand": {
-      "main": [[
-        { "node": "HTTP - YouTube Official Channel", "type": "main", "index": 0 },
-        { "node": "HTTP - YouTube General Search",   "type": "main", "index": 0 },
-        { "node": "HTTP - Brand Blog (og:image)",    "type": "main", "index": 0 },
-        { "node": "HTTP - DuckDuckGo Image",         "type": "main", "index": 0 }
-      ]]
-    },
-    "HTTP - YouTube Official Channel": {
-      "main": [[{ "node": "Merge - All Sources", "type": "main", "index": 0 }]]
-    },
-    "HTTP - YouTube General Search": {
-      "main": [[{ "node": "Merge - All Sources", "type": "main", "index": 1 }]]
-    },
-    "HTTP - Brand Blog (og:image)": {
-      "main": [[{ "node": "Merge - All Sources", "type": "main", "index": 2 }]]
-    },
-    "HTTP - DuckDuckGo Image": {
-      "main": [[{ "node": "Merge - All Sources", "type": "main", "index": 3 }]]
-    },
-    "Merge - All Sources": {
-      "main": [[{ "node": "Code - Score & Pick Best", "type": "main", "index": 0 }]]
-    },
-    "Code - Score & Pick Best": {
-      "main": [[{ "node": "IF - Has Video URL?", "type": "main", "index": 0 }]]
-    },
-    "IF - Has Video URL?": {
-      "main": [
-        [{ "node": "Sheets - Write Media URLs", "type": "main", "index": 0 }],
-        [{ "node": "Sheets - Mark Skipped",     "type": "main", "index": 0 }]
-      ]
-    },
-    "Sheets - Write Media URLs": {
       "main": [[{ "node": "HTTP - Trigger Render Worker", "type": "main", "index": 0 }]]
     },
     "HTTP - Trigger Render Worker": {
@@ -428,6 +183,6 @@
   "staticData": null,
   "meta": {
     "instanceId": "72266cf7104999cf4ca85f63c2ab37a3e4761c531fdaf0c90ee0d01f4616b5e6",
-    "notes": "Workflow B for the @execute-style tweet-card reel format. Triggered by a Reels-tab row update; finds source-company video + preview image, writes them to the row, then fires the build-tweet-card-reel GitHub Action. See plan: C:/Users/Marc/.claude/plans/cheeky-hugging-lecun.md and docs in publisher/workflows/n8n/reel_research_workflow.json (Workflow A)."
+    "notes": "Workflow B (SIMPLIFIED 2026-06-04). The Python build worker now self-finds its own media (keyless, demo-footage-first) and requires a real video clip, so n8n no longer needs to search YouTube / scrape blogs / score candidates / merge. That whole branch is removed - which also eliminated the '$env YouTube key blocked', Merge-config, and 'can't find YouTube URL' problems. n8n's only job now: on a 'Ready to Run' row, claim it to 'Building' and fire the GitHub render dispatch. Everything else (find media, require video, skip if none, render, upload, final Status) happens in GitHub Actions. The old full search version is in git history if ever needed."
   }
 }
