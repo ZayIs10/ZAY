@@ -39,7 +39,6 @@ from publisher.post_generator import SheetsReader  # noqa: E402
 from publisher.media_consumer import fetch_single_clip, fetch_image  # noqa: E402
 from publisher.tweet_card import render as render_card  # noqa: E402
 from publisher.compositor import build as composite_reel  # noqa: E402
-from publisher.compositor import build_still as composite_still  # noqa: E402
 
 RENDERS_DIR = REPO_ROOT / "renders"
 TMP_DIR = REPO_ROOT / ".tmp" / "tweet_card_reel"
@@ -92,6 +91,15 @@ def _read_row_by_index(reader: SheetsReader, row_index: int) -> dict:
 TRIGGER_STATUS = "ready to run"
 CLAIM_STATUS = "Building"          # set immediately so a re-poll won't double-fire
 DONE_STATUS = "Ready to Post"      # terminal: reel is in Drive, do NOT re-build
+SKIPPED_STATUS = "Skipped - No Video"  # terminal: no real clip found, post skipped
+
+
+class NoVideoError(RuntimeError):
+    """Raised when no usable source video clip could be found/downloaded.
+
+    The user's rule: a reel MUST use real footage. If there's no clip, we
+    SKIP the post rather than ship a still. The runner maps this to the
+    terminal SKIPPED_STATUS (not a hard failure / not a retry)."""
 
 
 def _find_ready_to_run_row(reader: SheetsReader) -> dict | None:
@@ -171,9 +179,9 @@ def build_reel_for_row(row: dict) -> Path:
     video_url = (row.get("Media Video URL") or "").strip()
     image_url = (row.get("Media Image URL") or "").strip()
 
-    # A reel needs a Topic + Caption, and AT LEAST a poster image. The video
-    # is NOT required: if no clip can be found/downloaded (e.g. YouTube search
-    # is bot-blocked in CI), we fall back to a Ken Burns still of the poster.
+    # A reel MUST use real footage. Topic + Caption + poster image + a usable
+    # source VIDEO are all required. If no clip can be found/downloaded, the
+    # post is SKIPPED (NoVideoError) — we never ship a still.
     missing = []
     if not topic:
         missing.append("Topic")
@@ -181,6 +189,8 @@ def build_reel_for_row(row: dict) -> Path:
         missing.append("Post Caption")
     if not image_url:
         missing.append("Media Image URL")
+    if not video_url:
+        missing.append("Media Video URL")
     if missing:
         raise RuntimeError(
             f"Row {row_index} missing required fields: {', '.join(missing)}"
@@ -192,20 +202,19 @@ def build_reel_for_row(row: dict) -> Path:
     TMP_DIR.mkdir(parents=True, exist_ok=True)
     RENDERS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Try to fetch the source video, but treat ANY failure (no URL, download
-    # blocked, empty result) as "no clip" -> still fallback, never a crash.
-    source_video = None
-    if video_url:
-        log.info("Downloading source video: %s", video_url)
-        try:
-            source_video = fetch_single_clip(video_url, slug, max_seconds=60.0)
-            if not source_video or not Path(source_video).exists():
-                source_video = None
-        except Exception as exc:  # noqa: BLE001 — fall back to still
-            log.warning("Source video fetch failed (%s) — using still.", exc)
-            source_video = None
-    else:
-        log.info("No Media Video URL — building a Ken Burns still reel.")
+    # Download the source video. If it can't be fetched (download blocked,
+    # empty result, error), the post is SKIPPED — no still fallback.
+    log.info("Downloading source video: %s", video_url)
+    try:
+        source_video = fetch_single_clip(video_url, slug, max_seconds=60.0)
+    except Exception as exc:  # noqa: BLE001 — map to skip
+        raise NoVideoError(
+            f"Row {row_index}: source video download failed ({exc})"
+        ) from exc
+    if not source_video or not Path(source_video).exists():
+        raise NoVideoError(
+            f"Row {row_index}: source video produced no file ({video_url})"
+        )
 
     log.info("Downloading poster image: %s", image_url)
     poster_rels = fetch_image(image_url, slug, count=1)
@@ -227,19 +236,12 @@ def build_reel_for_row(row: dict) -> Path:
     )
 
     out_mp4 = RENDERS_DIR / f"{slug}-tweet.mp4"
-    if source_video is not None:
-        log.info("Compositing reel (video) -> %s", out_mp4.name)
-        composite_reel(
-            card_png, source_video, poster_path, out_mp4,
-            preview_seconds=1.0,
-            max_seconds=60.0,
-        )
-    else:
-        log.info("Compositing reel (Ken Burns still) -> %s", out_mp4.name)
-        composite_still(
-            card_png, poster_path, out_mp4,
-            duration_seconds=8.0,
-        )
+    log.info("Compositing reel (video) -> %s", out_mp4.name)
+    composite_reel(
+        card_png, source_video, poster_path, out_mp4,
+        preview_seconds=1.0,
+        max_seconds=60.0,
+    )
 
     if not out_mp4.exists() or out_mp4.stat().st_size == 0:
         raise RuntimeError(f"Composite produced empty file: {out_mp4}")
@@ -276,8 +278,26 @@ def run(row_index: int | None, *, dry_run: bool) -> int:
             and row.get("Media Image URL", "").strip()):
         row = _ensure_media(reader, row_index, row, dry_run=dry_run)
 
+    # Hard rule: no real video clip -> SKIP the post (don't ship a still,
+    # don't mark it Failed). Routes to the terminal SKIPPED_STATUS below.
+    if not row.get("Media Video URL", "").strip():
+        msg = (f"Row {row_index}: no video clip found for "
+               f"{row.get('Topic', '')!r} — post skipped.")
+        log.warning(msg)
+        if not dry_run:
+            _try_update(reader, row_index, "Status", SKIPPED_STATUS)
+            _try_update(reader, row_index, "Media Status", msg[:200])
+        return 0
+
     try:
         mp4_path = build_reel_for_row(row)
+    except NoVideoError as exc:
+        # No real footage -> SKIP the post (terminal, not a failure/retry).
+        log.warning("Skipping row %d — no usable video: %s", row_index, exc)
+        if not dry_run:
+            _try_update(reader, row_index, "Status", SKIPPED_STATUS)
+            _try_update(reader, row_index, "Media Status", str(exc)[:200])
+        return 0
     except Exception as exc:
         log.error("Build failed: %s", exc)
         log.debug(traceback.format_exc())
