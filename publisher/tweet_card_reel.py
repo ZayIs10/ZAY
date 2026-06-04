@@ -39,6 +39,7 @@ from publisher.post_generator import SheetsReader  # noqa: E402
 from publisher.media_consumer import fetch_single_clip, fetch_image  # noqa: E402
 from publisher.tweet_card import render as render_card  # noqa: E402
 from publisher.compositor import build as composite_reel  # noqa: E402
+from publisher.compositor import build_still as composite_still  # noqa: E402
 
 RENDERS_DIR = REPO_ROOT / "renders"
 TMP_DIR = REPO_ROOT / ".tmp" / "tweet_card_reel"
@@ -170,13 +171,14 @@ def build_reel_for_row(row: dict) -> Path:
     video_url = (row.get("Media Video URL") or "").strip()
     image_url = (row.get("Media Image URL") or "").strip()
 
+    # A reel needs a Topic + Caption, and AT LEAST a poster image. The video
+    # is NOT required: if no clip can be found/downloaded (e.g. YouTube search
+    # is bot-blocked in CI), we fall back to a Ken Burns still of the poster.
     missing = []
     if not topic:
         missing.append("Topic")
     if not caption:
         missing.append("Post Caption")
-    if not video_url:
-        missing.append("Media Video URL")
     if not image_url:
         missing.append("Media Image URL")
     if missing:
@@ -190,8 +192,20 @@ def build_reel_for_row(row: dict) -> Path:
     TMP_DIR.mkdir(parents=True, exist_ok=True)
     RENDERS_DIR.mkdir(parents=True, exist_ok=True)
 
-    log.info("Downloading source video: %s", video_url)
-    source_video = fetch_single_clip(video_url, slug, max_seconds=60.0)
+    # Try to fetch the source video, but treat ANY failure (no URL, download
+    # blocked, empty result) as "no clip" -> still fallback, never a crash.
+    source_video = None
+    if video_url:
+        log.info("Downloading source video: %s", video_url)
+        try:
+            source_video = fetch_single_clip(video_url, slug, max_seconds=60.0)
+            if not source_video or not Path(source_video).exists():
+                source_video = None
+        except Exception as exc:  # noqa: BLE001 — fall back to still
+            log.warning("Source video fetch failed (%s) — using still.", exc)
+            source_video = None
+    else:
+        log.info("No Media Video URL — building a Ken Burns still reel.")
 
     log.info("Downloading poster image: %s", image_url)
     poster_rels = fetch_image(image_url, slug, count=1)
@@ -199,6 +213,8 @@ def build_reel_for_row(row: dict) -> Path:
     if not poster_path.exists() and poster_rels:
         # fetch_image returns paths relative to reels/index.html; resolve.
         poster_path = (REPO_ROOT / "reels" / poster_rels[0]).resolve()
+    if not poster_path.exists():
+        raise RuntimeError(f"Poster image download failed for row {row_index}")
 
     card_png = TMP_DIR / f"{slug}_card.png"
     log.info("Rendering tweet card -> %s", card_png.name)
@@ -211,12 +227,19 @@ def build_reel_for_row(row: dict) -> Path:
     )
 
     out_mp4 = RENDERS_DIR / f"{slug}-tweet.mp4"
-    log.info("Compositing reel -> %s", out_mp4.name)
-    composite_reel(
-        card_png, source_video, poster_path, out_mp4,
-        preview_seconds=1.0,
-        max_seconds=60.0,
-    )
+    if source_video is not None:
+        log.info("Compositing reel (video) -> %s", out_mp4.name)
+        composite_reel(
+            card_png, source_video, poster_path, out_mp4,
+            preview_seconds=1.0,
+            max_seconds=60.0,
+        )
+    else:
+        log.info("Compositing reel (Ken Burns still) -> %s", out_mp4.name)
+        composite_still(
+            card_png, poster_path, out_mp4,
+            duration_seconds=8.0,
+        )
 
     if not out_mp4.exists() or out_mp4.stat().st_size == 0:
         raise RuntimeError(f"Composite produced empty file: {out_mp4}")

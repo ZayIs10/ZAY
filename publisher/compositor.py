@@ -219,6 +219,73 @@ def build(
     return out_path
 
 
+def build_still(
+    card_png: Path,
+    poster_image: Path,
+    out_path: Path,
+    *,
+    duration_seconds: float = 8.0,
+) -> Path:
+    """Composite a reel from a STILL poster image with a slow Ken Burns
+    zoom, plus the tweet card. Used when no source video clip could be
+    found (e.g. YouTube search is bot-blocked in CI) — guarantees a reel
+    always ships, on-format and with no talking head. Silent by design.
+
+    Same canvas/rect/card geometry as build(), so the result is visually
+    consistent with the video version.
+    """
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    total_dur = max(3.0, duration_seconds)
+    frames = int(round(total_dur * 30))
+
+    log.info("Composite (STILL/Ken Burns): poster only -> %.1fs", total_dur)
+
+    # Ken Burns: scale up generously first (so zoompan has pixels to pan
+    # into without softening), then a slow 1.0 -> ~1.12 zoom centered.
+    # zoompan outputs at the rect size; we feed that straight into overlay.
+    kenburns = (
+        f"[1:v]scale={VIDEO_W*4}:{VIDEO_H*4}:"
+        f"force_original_aspect_ratio=increase,"
+        f"crop={VIDEO_W*4}:{VIDEO_H*4},"
+        f"zoompan=z='min(zoom+0.0006,1.12)':d={frames}:"
+        f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+        f"s={VIDEO_W}x{VIDEO_H}:fps=30,setsar=1[rect]"
+    )
+    video_graph = (
+        kenburns + ";"
+        f"[0:v][rect]overlay=x={VIDEO_X}:y={VIDEO_Y}:shortest=1[bg_rect];"
+        f"[bg_rect][2:v]overlay=x={CARD_X}:y={CARD_Y}:format=auto[v]"
+    )
+
+    cmd = [
+        _resolve_ffmpeg(), "-y", "-loglevel", "warning",
+        # 0: black canvas, full duration.
+        "-f", "lavfi", "-t", f"{total_dur:.2f}",
+        "-i", f"color=c=black:s={CANVAS_W}x{CANVAS_H}:r=30",
+        # 1: poster (single still; zoompan animates it).
+        "-loop", "1", "-t", f"{total_dur:.2f}", "-i", str(poster_image),
+        # 2: tweet card PNG.
+        "-i", str(card_png),
+        "-filter_complex", video_graph,
+        "-map", "[v]",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+        "-pix_fmt", "yuv420p",
+        "-r", "30", "-g", "30", "-keyint_min", "30",
+        "-movflags", "+faststart",
+        "-an",
+        "-t", f"{total_dur:.2f}",
+        str(out_path),
+    ]
+
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        log.error("ffmpeg stderr:\n%s", proc.stderr)
+        raise RuntimeError(
+            f"ffmpeg still-composite failed (exit {proc.returncode})"
+        )
+    return out_path
+
+
 # ---------------------------------------------------------------------------
 
 def _cli(argv: list[str]) -> int:
