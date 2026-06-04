@@ -23,6 +23,58 @@ def _is_brand_official(source: str) -> bool:
     return source.endswith("_official")
 
 
+# --- Demo-vs-talking-head signal -------------------------------------------
+# The reel format the user locked (@evolving.ai style) demands the background
+# clip SHOW the product DOING something — a screen recording, the UI in use,
+# the model generating, the output appearing — NOT a person talking about it.
+# A talking-head clip is boring and kills retention. We don't hard-reject
+# (user chose "prefer demo, fallback allowed") — we score, so a demo clip wins
+# whenever one exists, but a row still ships if only a talking clip is found.
+
+# Title/description words that signal "product in action".
+DEMO_WORDS: tuple[str, ...] = (
+    "demo", "demonstration", "screen record", "screen recording", "screencast",
+    "walkthrough", "walk through", "hands-on", "hands on", "in action",
+    "first look", "showcase", "preview", "trailer", "launch", "unveil",
+    "introducing", "generating", "generated", "creates", "creating", "builds",
+    "building", "how it works", "tutorial", "use case", "ui", "interface",
+    "tour", "feature", "capabilities", "test", "testing", "trying", "try",
+    "live", "output", "result",
+)
+
+# Title/description words that signal a talking head / commentary (penalize).
+TALKING_WORDS: tuple[str, ...] = (
+    "interview", "podcast", "keynote", "talk", "talks", "explains",
+    "explained", "reacts", "reaction", "discussion", "discusses", "opinion",
+    "thoughts on", "everything you need to know", "fireside", "panel",
+    "conversation", "sit down", "sit-down", "q&a", " q and a", "ama",
+    "commentary", "breakdown", "vlog",
+)
+
+DEMO_BONUS = 20      # one strong push so a demo clip clears a same-source talker
+TALKING_PENALTY = 18  # nearly cancels the bonus, but never zeroes a real source
+
+
+def _demo_signal(candidate: dict) -> int:
+    """Score a video candidate on whether its title reads like a product
+    demo (+) vs a talking-head clip (-). Image candidates score 0."""
+    if candidate.get("kind") != "video":
+        return 0
+    extra = candidate.get("extra") or {}
+    haystack = " ".join(
+        str(candidate.get(k) or "") for k in ("title", "page_url")
+    )
+    haystack += " " + str(extra.get("channel") or "")
+    haystack = haystack.lower()
+
+    delta = 0
+    if any(w in haystack for w in DEMO_WORDS):
+        delta += DEMO_BONUS
+    if any(w in haystack for w in TALKING_WORDS):
+        delta -= TALKING_PENALTY
+    return delta
+
+
 def score(candidate: dict, *, matched_brands: list[str] | None = None) -> int:
     """Return a numeric score for a single candidate (higher is better).
 
@@ -54,6 +106,8 @@ def score(candidate: dict, *, matched_brands: list[str] | None = None) -> int:
             base -= 10
         elif 3 <= dur <= 60:
             base += 5
+        # Prefer product-in-action footage over talking-head clips.
+        base += _demo_signal(candidate)
 
     # google_image hosted on a brand domain
     if src == "google_image" and matched_brands:

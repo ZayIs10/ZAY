@@ -149,6 +149,18 @@ def _build_query(topic: str, key_points: str) -> str:
     return q
 
 
+# Appended to a SECOND video search pass so the candidate pool actually
+# contains product-in-action footage (screen recordings, the model
+# generating, the UI in use) — the @evolving.ai look the user locked.
+# scoring._demo_signal then ranks these above any talking-head clips.
+_DEMO_QUERY_SUFFIX = "demo screen recording"
+
+
+def _demo_query(topic: str) -> str:
+    """A demo-biased variant of the topic query for the extra video pass."""
+    return f"{topic.strip()} {_DEMO_QUERY_SUFFIX}".strip()
+
+
 def discover_for_topic(topic: str, key_points: str) -> dict:
     """Run all sources in parallel and rank candidates.
 
@@ -162,15 +174,24 @@ def discover_for_topic(topic: str, key_points: str) -> dict:
     detect_text = f"{topic} {key_points}".strip()
     matched = brand_detect.detect_brands(detect_text)
     query = _build_query(topic, key_points)
-    log.info("Topic %r -> brands=%s, query=%r", topic, matched, query)
+    demo_query = _demo_query(topic)
+    log.info("Topic %r -> brands=%s, query=%r, demo_query=%r",
+             topic, matched, query, demo_query)
 
     # Each entry: (label, callable returning list[Candidate])
     tasks: list[tuple[str, callable]] = []
 
     for brand in matched:
+        # Two video passes per brand: the plain query AND a demo-biased one,
+        # so official product-demo footage actually enters the pool. The
+        # scoring module's _demo_signal then floats the demo clip to the top.
         tasks.append((
             f"{brand}_official_video",
             lambda b=brand: brand_official.search_videos(b, query, limit=5),
+        ))
+        tasks.append((
+            f"{brand}_official_demo",
+            lambda b=brand: brand_official.search_videos(b, demo_query, limit=5),
         ))
         tasks.append((
             f"{brand}_official_image",
@@ -179,6 +200,7 @@ def discover_for_topic(topic: str, key_points: str) -> dict:
 
     tasks.extend([
         ("youtube_video", lambda: youtube.search_videos(query, limit=5)),
+        ("youtube_demo", lambda: youtube.search_videos(demo_query, limit=5)),
         ("ddg_image", lambda: google_images.search_images(query, limit=8)),
         # Pexels = copyright-safe, directly-downloadable mp4 fallback so a
         # row never ends up with only un-downloadable URLs.
@@ -187,7 +209,7 @@ def discover_for_topic(topic: str, key_points: str) -> dict:
     ])
 
     all_candidates: list[dict] = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         future_to_label = {pool.submit(fn): label for label, fn in tasks}
         for fut in concurrent.futures.as_completed(future_to_label):
             label = future_to_label[fut]
