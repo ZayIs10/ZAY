@@ -58,6 +58,17 @@ def _slugify(text: str) -> str:
     return s[:40] or "reel"
 
 
+def _youtube_thumbnail_url(video_url: str) -> str:
+    """Derive a poster image from a YouTube watch URL's video id. Used as a
+    fallback when the row has no Media Image URL (e.g. niche topics where
+    the brand-blog og:image scrape comes up empty). Returns '' for non-YT."""
+    m = re.search(r"(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})", video_url or "")
+    if not m:
+        return ""
+    vid = m.group(1)
+    return f"https://img.youtube.com/vi/{vid}/maxresdefault.jpg"
+
+
 def _sheets_config() -> dict:
     load_dotenv(REPO_ROOT / ".env")
     sheet_id = os.getenv("GOOGLE_SHEET_ID")
@@ -179,16 +190,16 @@ def build_reel_for_row(row: dict) -> Path:
     video_url = (row.get("Media Video URL") or "").strip()
     image_url = (row.get("Media Image URL") or "").strip()
 
-    # A reel MUST use real footage. Topic + Caption + poster image + a usable
-    # source VIDEO are all required. If no clip can be found/downloaded, the
-    # post is SKIPPED (NoVideoError) — we never ship a still.
+    # A reel MUST use real footage. Topic + Caption + a usable source VIDEO
+    # are required. The poster image is OPTIONAL: if the finder didn't get
+    # one (e.g. niche topics where the brand-blog scrape finds nothing), we
+    # derive a poster from the video's own thumbnail. If no clip can be
+    # found/downloaded, the post is SKIPPED (NoVideoError) — never a still.
     missing = []
     if not topic:
         missing.append("Topic")
     if not caption:
         missing.append("Post Caption")
-    if not image_url:
-        missing.append("Media Image URL")
     if not video_url:
         missing.append("Media Video URL")
     if missing:
@@ -216,12 +227,25 @@ def build_reel_for_row(row: dict) -> Path:
             f"Row {row_index}: source video produced no file ({video_url})"
         )
 
-    log.info("Downloading poster image: %s", image_url)
-    poster_rels = fetch_image(image_url, slug, count=1)
+    # Poster: use the row's image if present, else fall back to the video's
+    # own thumbnail (always available for a YouTube clip) so a missing image
+    # never fails the build.
+    if not image_url:
+        image_url = _youtube_thumbnail_url(video_url)
+        if image_url:
+            log.info("No poster image — using video thumbnail: %s", image_url)
+
     poster_path = REPO_ROOT / "assets" / "images" / "auto" / f"{slug}_auto.jpg"
-    if not poster_path.exists() and poster_rels:
-        # fetch_image returns paths relative to reels/index.html; resolve.
-        poster_path = (REPO_ROOT / "reels" / poster_rels[0]).resolve()
+    if image_url:
+        log.info("Downloading poster image: %s", image_url)
+        try:
+            poster_rels = fetch_image(image_url, slug, count=1)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Poster image fetch failed (%s)", exc)
+            poster_rels = []
+        if not poster_path.exists() and poster_rels:
+            # fetch_image returns paths relative to reels/index.html; resolve.
+            poster_path = (REPO_ROOT / "reels" / poster_rels[0]).resolve()
     if not poster_path.exists():
         raise RuntimeError(f"Poster image download failed for row {row_index}")
 
