@@ -219,6 +219,128 @@ def build(
     return out_path
 
 
+def _build_beat_segment(
+    card_png: Path,
+    clip: Path,
+    out_path: Path,
+    *,
+    seconds: float,
+) -> Path:
+    """Render ONE beat segment: the beat's clip center-cropped to fill the
+    rect, that beat's tweet card overlaid, on the black canvas. Keeps the
+    clip's own audio (silent if it has none). Exactly `seconds` long — if
+    the clip is shorter it is looped to fill, so every beat holds its full
+    on-screen time.
+    """
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    keep_audio = has_audio(clip)
+
+    crop_filter = (
+        f"scale={VIDEO_W}:{VIDEO_H}:force_original_aspect_ratio=increase,"
+        f"crop={VIDEO_W}:{VIDEO_H},setsar=1"
+    )
+    video_graph = (
+        f"[1:v]{crop_filter},fps=30,trim=duration={seconds:.2f},"
+        f"setpts=PTS-STARTPTS[clip];"
+        f"[0:v][clip]overlay=x={VIDEO_X}:y={VIDEO_Y}:shortest=1[bg];"
+        f"[bg][2:v]overlay=x={CARD_X}:y={CARD_Y}:format=auto[v]"
+    )
+
+    cmd = [
+        _resolve_ffmpeg(), "-y", "-loglevel", "warning",
+        "-f", "lavfi", "-t", f"{seconds:.2f}",
+        "-i", f"color=c=black:s={CANVAS_W}x{CANVAS_H}:r=30",
+        # Loop the clip so a short source still fills the beat's full time.
+        "-stream_loop", "-1", "-i", str(clip),
+        "-i", str(card_png),
+    ]
+    # Declare ALL inputs (incl. the silence source) BEFORE any -map/-filter,
+    # otherwise ffmpeg rejects the input option ordering. Input index 3 =
+    # anullsrc, used only when the clip has no audio of its own.
+    if not keep_audio:
+        cmd += [
+            "-f", "lavfi", "-t", f"{seconds:.2f}",
+            "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+        ]
+
+    if keep_audio:
+        cmd += [
+            "-filter_complex",
+            video_graph + f";[1:a]atrim=duration={seconds:.2f},asetpts=PTS-STARTPTS[a]",
+            "-map", "[v]", "-map", "[a]",
+        ]
+    else:
+        cmd += ["-filter_complex", video_graph, "-map", "[v]", "-map", "3:a"]
+
+    # Every segment MUST carry an audio track (even silence) so the final
+    # concat doesn't desync when some beats have audio and others don't.
+    cmd += [
+        "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+        "-pix_fmt", "yuv420p", "-r", "30", "-g", "30", "-keyint_min", "30",
+        "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2",
+        "-t", f"{seconds:.2f}", str(out_path),
+    ]
+
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        log.error("ffmpeg stderr:\n%s", proc.stderr)
+        raise RuntimeError(f"beat segment failed (exit {proc.returncode})")
+    return out_path
+
+
+def build_multibeat(
+    beat_cards: list[Path],
+    beat_clips: list[Path],
+    out_path: Path,
+    *,
+    seconds_per_beat: float = 3.5,
+    max_seconds: float = 60.0,
+) -> Path:
+    """Composite a MULTI-BEAT reel: one segment per beat (that beat's clip
+    + that beat's tweet card), hard-cut and concatenated in order. This is
+    the @evolving.ai look — footage changes on every text reveal.
+
+    `beat_cards` and `beat_clips` are parallel lists (one per beat). Each
+    beat holds `seconds_per_beat`, capped so the whole reel <= max_seconds.
+    Keeps each clip's own audio across its segment.
+    """
+    if not beat_cards or len(beat_cards) != len(beat_clips):
+        raise ValueError("beat_cards and beat_clips must be same non-zero length")
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    n = len(beat_cards)
+    per = min(seconds_per_beat, max(1.5, max_seconds / n))
+    log.info("Multi-beat: %d beats x %.2fs = %.1fs total", n, per, n * per)
+
+    seg_dir = out_path.parent / "_beats"
+    seg_dir.mkdir(parents=True, exist_ok=True)
+    segments: list[Path] = []
+    for i, (card, clip) in enumerate(zip(beat_cards, beat_clips)):
+        seg = seg_dir / f"seg_{i:02d}.mp4"
+        log.info("Beat segment %d/%d -> %s", i + 1, n, seg.name)
+        _build_beat_segment(card, clip, seg, seconds=per)
+        segments.append(seg)
+
+    # Concat via the demuxer (all segments share codec/params, so this is
+    # a clean stream copy — fast and frame-accurate).
+    concat_list = seg_dir / "concat.txt"
+    concat_list.write_text(
+        "".join(f"file '{s.as_posix()}'\n" for s in segments),
+        encoding="utf-8",
+    )
+    cmd = [
+        _resolve_ffmpeg(), "-y", "-loglevel", "warning",
+        "-f", "concat", "-safe", "0", "-i", str(concat_list),
+        "-c", "copy", "-movflags", "+faststart",
+        str(out_path),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        log.error("ffmpeg concat stderr:\n%s", proc.stderr)
+        raise RuntimeError(f"multi-beat concat failed (exit {proc.returncode})")
+    return out_path
+
+
 def build_still(
     card_png: Path,
     poster_image: Path,
