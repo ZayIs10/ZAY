@@ -47,10 +47,14 @@ def search_videos(brand: str, query: str, limit: int = 5) -> list[dict]:
     """
     cfg = brand_config(brand)
     handle = cfg.get("youtube_channel")
-    if not handle:
+    channel_id = cfg.get("youtube_handle_id")
+    if not handle and not channel_id:
         return []
 
-    cands = ytsrc.search_videos(query, limit=limit, channel_handle=handle)
+    cands = ytsrc.search_videos(
+        query, limit=limit,
+        channel_handle=handle, channel_id=channel_id,
+    )
     # Re-label so the scoring module knows these came from the official
     # channel and gives them the higher tier.
     for c in cands:

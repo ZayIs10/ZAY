@@ -18,9 +18,98 @@ import os
 from pathlib import Path
 from typing import Any
 
+import requests
+
 log = logging.getLogger("media_sources.youtube")
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+
+_YT_API_SEARCH = "https://www.googleapis.com/youtube/v3/search"
+
+
+def _youtube_api_key() -> str | None:
+    key = (os.getenv("YOUTUBE_API_KEY") or "").strip()
+    if not key:
+        # Defensive: this module may be imported before the entry script
+        # loads .env. Load it once here so the API path isn't silently
+        # skipped (which would drop us to the bot-blocked scrape in CI).
+        try:
+            from dotenv import load_dotenv
+            load_dotenv(_REPO_ROOT / ".env")
+            key = (os.getenv("YOUTUBE_API_KEY") or "").strip()
+        except Exception:  # noqa: BLE001 — dotenv optional
+            pass
+    return key or None
+
+
+def _search_via_api(
+    query: str,
+    limit: int,
+    *,
+    channel_id: str | None = None,
+) -> list[dict]:
+    """Search YouTube via the Data API v3. Reliable from datacenter IPs
+    (unlike the yt-dlp scrape, which YouTube bot-blocks from CI). Returns
+    Candidate dicts; the watch URL is still downloaded by yt-dlp later.
+
+    Raises on any API/HTTP error so the caller can fall back to scraping.
+    """
+    key = _youtube_api_key()
+    if not key:
+        raise RuntimeError("no YOUTUBE_API_KEY")
+
+    params = {
+        "part": "snippet",
+        "type": "video",
+        "order": "relevance",
+        "maxResults": str(min(max(limit, 1), 10)),
+        "q": query,
+        "key": key,
+    }
+    if channel_id:
+        params["channelId"] = channel_id
+
+    r = requests.get(_YT_API_SEARCH, params=params, timeout=20)
+    if r.status_code != 200:
+        # Surface quota/key errors clearly, then let the caller fall back.
+        snippet = (r.text or "")[:160]
+        raise RuntimeError(f"YouTube API HTTP {r.status_code}: {snippet}")
+    data = r.json()
+
+    candidates: list[dict] = []
+    for it in data.get("items", []):
+        vid = (it.get("id") or {}).get("videoId")
+        if not vid:
+            continue
+        sn = it.get("snippet") or {}
+        thumbs = sn.get("thumbnails") or {}
+        thumb = (
+            (thumbs.get("high") or thumbs.get("medium") or thumbs.get("default") or {})
+            .get("url", "")
+        )
+        watch_url = f"https://www.youtube.com/watch?v={vid}"
+        candidates.append({
+            "source": "youtube",
+            "kind": "video",
+            "title": sn.get("title") or watch_url,
+            "page_url": watch_url,
+            "media_url": watch_url,
+            "thumbnail": thumb,
+            # The search endpoint doesn't return duration; scoring treats
+            # 0 as "unknown" (no duration bonus/penalty), which is fine.
+            "duration_s": 0.0,
+            "width": 0,
+            "height": 0,
+            "extra": {
+                "video_id": vid,
+                "channel": sn.get("channelTitle"),
+                "channel_id": sn.get("channelId"),
+                "view_count": None,
+                "is_official": bool(channel_id),
+                "via": "api",
+            },
+        })
+    return candidates
 
 
 def _youtube_cookiefile() -> str | None:
@@ -71,13 +160,35 @@ def search_videos(
     limit: int = 5,
     *,
     channel_handle: str | None = None,
+    channel_id: str | None = None,
     flat_mode: bool = True,
 ) -> list[dict]:
     """Search YouTube for `query` and return up to `limit` Candidate dicts.
 
-    If `channel_handle` is given (e.g. "@OpenAI"), the query is rewritten
-    to constrain results to that channel.
+    Strategy:
+      1. If YOUTUBE_API_KEY is set, use the Data API — it's RELIABLE from
+         datacenter IPs (GitHub Actions), where the yt-dlp search scrape is
+         bot-blocked and returns 0 results. The API gives clean video IDs +
+         titles (titles feed the demo-vs-talking-head scorer). channel_id
+         constrains to an official channel exactly.
+      2. Otherwise (or if the API errors / hits quota) fall back to the
+         yt-dlp ytsearch scrape, appending the handle to bias results.
+
+    Either way the result is a watch URL; yt-dlp + cookies downloads the
+    actual MP4 later (the download path is NOT bot-blocked with cookies).
     """
+    # --- Preferred: YouTube Data API (works from the cloud) ---------------
+    if _youtube_api_key():
+        try:
+            cands = _search_via_api(query, limit, channel_id=channel_id)
+            log.info("YouTube API search %r -> %d results", query, len(cands))
+            return cands
+        except Exception as exc:
+            log.warning(
+                "YouTube API search failed (%s) — falling back to scrape.", exc
+            )
+
+    # --- Fallback: yt-dlp scrape ------------------------------------------
     if channel_handle:
         # yt-dlp doesn't expose a direct channel-search filter; the most
         # reliable trick is to append the handle to the query — YouTube's

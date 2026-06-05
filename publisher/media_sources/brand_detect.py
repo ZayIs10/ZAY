@@ -28,7 +28,7 @@ BRANDS: dict[str, dict] = {
         "site": "https://anthropic.com",
         "blog_index": "https://www.anthropic.com/news",
         "youtube_channel": "@anthropic-ai",
-        "youtube_handle_id": None,
+        "youtube_handle_id": "UCrDwWp7EBBv4NwvScIpBDOA",
     },
     "google": {
         "aliases": [
@@ -38,7 +38,7 @@ BRANDS: dict[str, dict] = {
         "site": "https://blog.google",
         "blog_index": "https://blog.google/technology/ai/",
         "youtube_channel": "@Google",
-        "youtube_handle_id": None,
+        "youtube_handle_id": "UCK8sQmJBp8GCxrOtXWBpyEA",
     },
     "meta": {
         "aliases": [
@@ -47,7 +47,7 @@ BRANDS: dict[str, dict] = {
         "site": "https://ai.meta.com",
         "blog_index": "https://ai.meta.com/blog/",
         "youtube_channel": "@MetaAI",
-        "youtube_handle_id": None,
+        "youtube_handle_id": "UCh6InhosKmD_Fofs9XJdz6Q",
     },
     "mistral": {
         "aliases": ["mistral", "mixtral", "mistral ai"],
@@ -68,7 +68,7 @@ BRANDS: dict[str, dict] = {
         "site": "https://www.microsoft.com/en-us/ai",
         "blog_index": "https://blogs.microsoft.com/ai/",
         "youtube_channel": "@Microsoft",
-        "youtube_handle_id": None,
+        "youtube_handle_id": "UCFtEEv80fQVKkD4h1PF-Xqw",
     },
 }
 
