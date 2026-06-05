@@ -36,11 +36,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from publisher.post_generator import SheetsReader  # noqa: E402
-from publisher.media_consumer import fetch_single_clip  # noqa: E402
+from publisher.media_consumer import fetch_single_clip, fetch_image  # noqa: E402
 from publisher.tweet_card import render as render_card  # noqa: E402
-from publisher.compositor import build_multibeat  # noqa: E402
-from publisher.beats import split_caption  # noqa: E402
-from publisher.beat_media import find_beat_clips  # noqa: E402
+from publisher.compositor import build as composite_reel  # noqa: E402
 
 RENDERS_DIR = REPO_ROOT / "renders"
 TMP_DIR = REPO_ROOT / ".tmp" / "tweet_card_reel"
@@ -181,22 +179,22 @@ def build_reel_for_row(row: dict) -> Path:
     video_url = (row.get("Media Video URL") or "").strip()
     image_url = (row.get("Media Image URL") or "").strip()
 
-    # A reel MUST use real footage. Topic + Caption + a usable source VIDEO
-    # are required. The multi-beat build finds a clip PER BEAT; the poster
-    # image is no longer used (no still intro). If no beat clip can be
-    # downloaded, the post is SKIPPED (NoVideoError) — never a still.
+    # A reel MUST use real footage. Topic + Caption + poster image + a usable
+    # source VIDEO are all required. If no clip can be found/downloaded, the
+    # post is SKIPPED (NoVideoError) — we never ship a still.
     missing = []
     if not topic:
         missing.append("Topic")
     if not caption:
         missing.append("Post Caption")
+    if not image_url:
+        missing.append("Media Image URL")
     if not video_url:
         missing.append("Media Video URL")
     if missing:
         raise RuntimeError(
             f"Row {row_index} missing required fields: {', '.join(missing)}"
         )
-    _ = image_url  # retained for back-compat; multi-beat doesn't use a poster
 
     slug = _slugify(topic)
     log.info("Row %d -> slug=%s", row_index, slug)
@@ -204,73 +202,44 @@ def build_reel_for_row(row: dict) -> Path:
     TMP_DIR.mkdir(parents=True, exist_ok=True)
     RENDERS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # --- Multi-beat build (@evolving.ai look: footage cuts per text line) --
-    # Split the caption into beats; find a distinct clip per beat; download
-    # the unique clips; render a tweet card per beat; concat the segments.
-    beats = split_caption(caption)
-    if not beats:
-        raise RuntimeError(f"Row {row_index}: caption produced no beats")
-    log.info("Row %d -> %d beats", row_index, len(beats))
-
-    key_points = (row.get("Key Points") or "").strip()
-    beat_meta = find_beat_clips(beats, topic, key_points)
-
-    # Seed the first beat with the row's own Media Video URL so the clip the
-    # finder already wrote is always in play (and beat 0 = the hook clip).
-    if beat_meta and not (beat_meta[0] or {}).get("media_url") and video_url:
-        beat_meta[0] = {"media_url": video_url, "title": "row media"}
-
-    # Download each UNIQUE clip url once (shared across beats that reuse it).
-    clip_cache: dict[str, Path] = {}
-    beat_clips: list[Path] = []
-    for b, meta in zip(beats, beat_meta):
-        url = (meta or {}).get("media_url", "") if meta else ""
-        if not url and video_url:
-            url = video_url  # last-ditch: the row's own clip
-        if not url:
-            beat_clips.append(None)
-            continue
-        if url not in clip_cache:
-            try:
-                clip_cache[url] = fetch_single_clip(
-                    url, f"{slug}_b{b.index}", max_seconds=60.0,
-                )
-            except Exception as exc:  # noqa: BLE001
-                log.warning("Beat %d clip download failed (%s)", b.index, exc)
-                clip_cache[url] = None
-        beat_clips.append(clip_cache[url])
-
-    # Fill any failed-download beats by reusing a clip that DID download.
-    ok_clips = [c for c in beat_clips if c and Path(c).exists()]
-    if not ok_clips:
+    # Download the source video. If it can't be fetched (download blocked,
+    # empty result, error), the post is SKIPPED — no still fallback.
+    log.info("Downloading source video: %s", video_url)
+    try:
+        source_video = fetch_single_clip(video_url, slug, max_seconds=60.0)
+    except Exception as exc:  # noqa: BLE001 — map to skip
         raise NoVideoError(
-            f"Row {row_index}: no beat clip could be downloaded — post skipped."
+            f"Row {row_index}: source video download failed ({exc})"
+        ) from exc
+    if not source_video or not Path(source_video).exists():
+        raise NoVideoError(
+            f"Row {row_index}: source video produced no file ({video_url})"
         )
-    ri = 0
-    for i, c in enumerate(beat_clips):
-        if not (c and Path(c).exists()):
-            beat_clips[i] = ok_clips[ri % len(ok_clips)]
-            ri += 1
 
-    # Render a tweet card per beat (same approved template, text per beat).
-    beat_cards: list[Path] = []
-    for b in beats:
-        card = TMP_DIR / f"{slug}_card_{b.index}.png"
-        render_card(
-            b.text,
-            handle="@genzcapital",
-            display_name="Gen Z Capital",
-            avatar_path=LOGO_PATH,
-            out_path=card,
-        )
-        beat_cards.append(card)
+    log.info("Downloading poster image: %s", image_url)
+    poster_rels = fetch_image(image_url, slug, count=1)
+    poster_path = REPO_ROOT / "assets" / "images" / "auto" / f"{slug}_auto.jpg"
+    if not poster_path.exists() and poster_rels:
+        # fetch_image returns paths relative to reels/index.html; resolve.
+        poster_path = (REPO_ROOT / "reels" / poster_rels[0]).resolve()
+    if not poster_path.exists():
+        raise RuntimeError(f"Poster image download failed for row {row_index}")
+
+    card_png = TMP_DIR / f"{slug}_card.png"
+    log.info("Rendering tweet card -> %s", card_png.name)
+    render_card(
+        caption,
+        handle="@genzcapital",
+        display_name="Gen Z Capital",
+        avatar_path=LOGO_PATH,
+        out_path=card_png,
+    )
 
     out_mp4 = RENDERS_DIR / f"{slug}-tweet.mp4"
-    log.info("Compositing MULTI-BEAT reel (%d beats) -> %s",
-             len(beats), out_mp4.name)
-    build_multibeat(
-        beat_cards, beat_clips, out_mp4,
-        seconds_per_beat=3.5,
+    log.info("Compositing reel (video) -> %s", out_mp4.name)
+    composite_reel(
+        card_png, source_video, poster_path, out_mp4,
+        preview_seconds=1.0,
         max_seconds=60.0,
     )
 
