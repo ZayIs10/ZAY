@@ -276,7 +276,7 @@ def append_draft_row(reader, payload: dict) -> int:
         "Post URL": "",
         "Instagram Post ID": "",
         "Image": "",
-        "Post Type": "reel",
+        "Post Type": payload.get("_post_type", "reel"),
         "Slide Content": "",
         "Headline Line 1 (White)": payload.get("headline_line_1", ""),
         "Headline Line 2 (Neon Green)": payload.get("headline_line_2", ""),
@@ -334,6 +334,22 @@ def main() -> int:
         videos = enrich_with_youtube(args.topic, config.get("youtube", {}).get("api_key"))
     context = build_enriched_context(news, videos)
 
+    # Phase 1.5: format qualification — is this topic a REEL or a CAROUSEL?
+    # Not every topic suits a 30s reel; multi-step how-tos / tool lists /
+    # comparisons belong in a swipeable carousel (the @evolving.ai split).
+    from format_classifier import classify_format  # type: ignore
+
+    classifier_model = config["openai"].get("model", "gpt-4o-mini")
+    fmt = classify_format(
+        topic=args.topic,
+        key_points=context,
+        client=client,
+        model=classifier_model,
+    )
+    log.info("Format: %s (%.0f%% via %s) — %s",
+             fmt["format"], fmt["confidence"] * 100,
+             fmt["source"], fmt["reason"])
+
     # Phase 2: GPT call
     log.info("Calling GPT-4o (model=%s)...", config["openai"].get("model", "gpt-4o"))
     payload = call_gpt(
@@ -351,6 +367,8 @@ def main() -> int:
     payload["_brand_tone"] = config.get("brand_tone", "")
     payload["_context"] = context
     payload["_videos"] = videos
+    payload["_post_type"] = fmt["format"]
+    payload["_format_reason"] = fmt["reason"]
     payload["_generated_at"] = datetime.utcnow().isoformat() + "Z"
 
     if args.dry_run:
@@ -371,6 +389,7 @@ def main() -> int:
     print()
     print(f"=== DRAFT WRITTEN to row {row_index} ===")
     print(f"Topic:    {args.topic}")
+    print(f"Format:   {payload['_post_type'].upper()}  ({payload['_format_reason']})")
     print(f"Template: {payload['template']}")
     print(f"Hook:     {payload.get('headline_line_1', '')} / "
           f"{payload.get('headline_line_2', '')} / "
