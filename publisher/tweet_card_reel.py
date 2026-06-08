@@ -130,6 +130,36 @@ def _find_ready_to_run_row(reader: SheetsReader) -> dict | None:
     return None
 
 
+def _find_row_by_topic(reader: SheetsReader, topic: str) -> dict:
+    """Return the row whose Topic matches `topic` (trimmed, case-insensitive).
+
+    This is the ROBUST way for n8n to address a row: it sends the exact Topic
+    string (which it already has) instead of a row NUMBER, which silently
+    breaks if the sheet is sorted/inserted/deleted between firing and building
+    — the bug where 'build Opus 4.8' actually rendered the billionaire row.
+    """
+    want = topic.strip().lower()
+    all_values = reader.ws.get_all_values()
+    if not all_values:
+        raise RuntimeError("Sheet is empty")
+    headers = all_values[0]
+    matches = []
+    for i, raw in enumerate(all_values[1:], start=2):
+        row = {headers[j]: raw[j] if j < len(raw) else "" for j in range(len(headers))}
+        if str(row.get("Topic", "")).strip().lower() == want:
+            row["_row_index"] = i
+            matches.append(row)
+    if not matches:
+        raise RuntimeError(f"No row found with Topic == {topic!r}")
+    if len(matches) > 1:
+        rows = ", ".join(str(m["_row_index"]) for m in matches)
+        raise RuntimeError(
+            f"Topic {topic!r} matches {len(matches)} rows ({rows}); "
+            "Topic must be unique to build by topic."
+        )
+    return matches[0]
+
+
 def _try_update(reader: SheetsReader, row_index: int, header: str, value: str) -> None:
     """Best-effort cell update — log + skip if the column doesn't exist."""
     try:
@@ -274,11 +304,15 @@ def build_reel_for_row(row: dict) -> Path:
     return out_mp4
 
 
-def run(row_index: int | None, *, dry_run: bool) -> int:
+def run(row_index: int | None, *, topic: str | None = None, dry_run: bool) -> int:
     config = _sheets_config()
     reader = SheetsReader(config)
 
-    if row_index is None:
+    if topic is not None:
+        # Preferred path: address the row by its unambiguous Topic string.
+        row = _find_row_by_topic(reader, topic)
+        row_index = row["_row_index"]
+    elif row_index is None:
         row = _find_ready_to_run_row(reader)
         if row is None:
             log.info("No row with Status='Ready to Run' (+Topic). Nothing to do.")
@@ -351,8 +385,29 @@ def run(row_index: int | None, *, dry_run: bool) -> int:
     )
     _try_update(reader, row_index, "Status", DONE_STATUS)
 
+    # Email the user a review draft: Drive link + the caption + hashtags that
+    # are ALREADY in the sheet row (drafted upstream by research). Best-effort —
+    # a notify failure must never undo an otherwise-successful render.
+    _send_review_email(row, download_url)
+
     log.info("Done. Row %d -> Status=%s, mp4=%s", row_index, DONE_STATUS, download_url)
     return 0
+
+
+def _send_review_email(row: dict, drive_url: str) -> None:
+    """Compose + send the 'ready to review' email from the row's own fields.
+
+    Post Caption already contains the hashtags (the sheet keeps them in one
+    field), so it's emailed verbatim as a single copy-paste-ready block.
+    """
+    from publisher.notify_email import build_review_email, send  # late import
+
+    subject, body = build_review_email(
+        topic=(row.get("Topic") or "").strip(),
+        caption=(row.get("Post Caption") or "").strip(),
+        drive_url=drive_url,
+    )
+    send(subject, body)
 
 
 # ---------------------------------------------------------------------------
@@ -361,13 +416,20 @@ def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument("--row", type=int, help="1-indexed sheet row to render")
+    g.add_argument("--topic", type=str,
+                   help="Render the row whose Topic matches this (preferred: "
+                        "robust against the sheet being sorted/reordered)")
     g.add_argument("--next", action="store_true",
                    help="Render the next Status='Ready to Run' row")
     p.add_argument("--dry-run", action="store_true",
                    help="Build mp4 locally, skip Drive upload + Sheet update")
     args = p.parse_args(argv)
 
-    return run(args.row if not args.next else None, dry_run=args.dry_run)
+    return run(
+        args.row if not (args.next or args.topic) else None,
+        topic=args.topic,
+        dry_run=args.dry_run,
+    )
 
 
 if __name__ == "__main__":

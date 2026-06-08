@@ -18,9 +18,13 @@ on:
     types: [build-tweet-card-reel]
   workflow_dispatch:
     inputs:
+      topic:
+        description: "Exact Topic string to render (preferred; robust to row reordering)"
+        required: false
+        type: string
       row_index:
-        description: "1-indexed Reels-tab row to render"
-        required: true
+        description: "1-indexed Reels-tab row to render (fallback if topic is blank)"
+        required: false
         type: string
 
 jobs:
@@ -33,6 +37,11 @@ jobs:
       GOOGLE_SHEET_REELS_NAME: Reels
       YOUTUBE_COOKIES_FILE: youtube_cookies.txt
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      # Review-email notifier (Gmail SMTP, app password). If these secrets are
+      # unset the build still succeeds — it just skips the email.
+      GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+      NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
 
     steps:
       - name: Checkout
@@ -92,23 +101,39 @@ jobs:
             echo "::warning::YOUTUBE_COOKIES secret not set — YouTube downloads may be bot-blocked."
           fi
 
-      - name: Resolve row index
-        id: row
+      - name: Resolve target (topic preferred, row_index fallback)
+        id: target
+        env:
+          # Topic is the robust selector: it can't drift if the sheet is
+          # re-sorted between n8n firing and this build running. row_index
+          # is kept only as a fallback for old callers / manual runs.
+          TOPIC: ${{ github.event.client_payload.topic || github.event.inputs.topic }}
+          ROW_INDEX: ${{ github.event.client_payload.row_index || github.event.inputs.row_index }}
         run: |
-          ROW_INDEX="${{ github.event.client_payload.row_index || github.event.inputs.row_index }}"
-          if [ -z "$ROW_INDEX" ]; then
-            echo "::error::No row_index provided (client_payload.row_index or workflow_dispatch input)"
+          if [ -n "$TOPIC" ]; then
+            echo "mode=topic" >> "$GITHUB_OUTPUT"
+            echo "topic=$TOPIC" >> "$GITHUB_OUTPUT"
+            echo "Building reel for Topic: $TOPIC"
+          elif [ -n "$ROW_INDEX" ]; then
+            echo "mode=row" >> "$GITHUB_OUTPUT"
+            echo "row=$ROW_INDEX" >> "$GITHUB_OUTPUT"
+            echo "Building reel for Reels row $ROW_INDEX (no topic given)"
+          else
+            echo "::error::Neither topic nor row_index provided"
             exit 1
           fi
-          echo "value=$ROW_INDEX" >> "$GITHUB_OUTPUT"
-          echo "Building reel for Reels row $ROW_INDEX"
 
       - name: Build reel
         run: |
           set -o pipefail   # fail the step if python fails, not just tee
           mkdir -p logs renders
-          python publisher/tweet_card_reel.py --row "${{ steps.row.outputs.value }}" 2>&1 \
-            | tee "logs/tweet_card_reel_row${{ steps.row.outputs.value }}.log"
+          if [ "${{ steps.target.outputs.mode }}" = "topic" ]; then
+            python publisher/tweet_card_reel.py --topic "${{ steps.target.outputs.topic }}" 2>&1 \
+              | tee "logs/tweet_card_reel.log"
+          else
+            python publisher/tweet_card_reel.py --row "${{ steps.target.outputs.row }}" 2>&1 \
+              | tee "logs/tweet_card_reel_row${{ steps.target.outputs.row }}.log"
+          fi
 
       - name: Upload logs
         if: always()
