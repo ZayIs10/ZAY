@@ -28,6 +28,7 @@ import concurrent.futures
 import json
 import logging
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -139,10 +140,87 @@ def _select_pending_rows(ws) -> list[int]:
 # Discovery
 # ---------------------------------------------------------------------------
 
+# Filler words that, on their own, never make a good search keyword. Used
+# to decide whether the colon-prefix is a real subject or just clickbait.
+_STOPWORDS = {
+    "the", "a", "an", "this", "that", "how", "why", "what", "when", "your",
+    "you", "is", "are", "of", "to", "in", "on", "for", "and", "or", "ai",
+}
+
+
+def extract_keyword(topic: str) -> str:
+    """Auto-detect the core subject of a Topic title for use as the lead
+    YouTube search term.
+
+    The titles follow a "<Subject>: <clickbait hook>" pattern, e.g.
+        "Claude Mythos: The AI That Hacks Like a Pro"  -> "Claude Mythos"
+        "Sora 2: Video That Fools Everyone"            -> "Sora 2"
+    The part AFTER the colon is marketing copy that pollutes the search,
+    so we lead with the part BEFORE it.
+
+    Rules, in order:
+      1. If there's a colon (or dash) separator, the left side is the keyword
+         — UNLESS it's only filler words, in which case fall through.
+      2. Otherwise take the leading run of Capitalized / numeric tokens
+         (the proper-noun phrase: "Claude Mythos", "GPT 5", "Sora 2").
+      3. Otherwise return the topic unchanged.
+    """
+    t = (topic or "").strip()
+    if not t:
+        return ""
+
+    # 1. Colon / em-dash / " - " separator -> left side is the subject.
+    m = re.split(r"\s*[:–—]\s*|\s+-\s+", t, maxsplit=1)
+    if len(m) == 2:
+        left = m[0].strip()
+        words = left.split()
+        if left and any(w.strip(".,!?").lower() not in _STOPWORDS for w in words):
+            return left
+
+    # 2. Leading proper-noun / number phrase ("Claude Mythos", "Sora 2").
+    #    Cap at 3 tokens so a whole capitalized sentence ("GPT 5 Just Changed
+    #    Everything") doesn't get mistaken for a product name.
+    tokens = t.split()
+    lead: list[str] = []
+    for tok in tokens[:3]:
+        bare = tok.strip(".,!?:")
+        if bare and (bare[0].isupper() or bare[0].isdigit()):
+            lead.append(tok)
+        else:
+            break
+    # Strip a leading stopword ("The Future" -> "Future" is not a name).
+    while lead and lead[0].strip(".,!?:").lower() in _STOPWORDS:
+        lead.pop(0)
+    # Only trust this as a keyword when it's a multi-token name or a single
+    # token paired with a version number; a lone capitalized word is too
+    # likely to be a sentence start, so fall back to the full title instead.
+    if len(lead) >= 2 and any(len(w.strip(".,!?")) > 1 for w in lead):
+        return " ".join(lead).rstrip(":,")
+
+    # 3. Nothing cleaner than the whole title.
+    return t
+
+
 def _build_query(topic: str, key_points: str) -> str:
-    """Compose the search query. Topic is primary; the first ~80 chars of
-    Key Points add specificity."""
-    q = topic.strip()
+    """Compose the YouTube search query.
+
+    The auto-detected keyword (e.g. "Claude Mythos" from
+    "Claude Mythos: The AI That Hacks Like a Pro") LEADS the query so
+    YouTube ranks footage that matches the real subject instead of the
+    clickbait tail. The full topic and a Key Points snippet follow to add
+    context without diluting the lead term.
+    """
+    topic = topic.strip()
+    keyword = extract_keyword(topic)
+
+    # When the keyword came from a colon split, the tail is clickbait copy —
+    # drop it and search the keyword alone. When the keyword IS the whole
+    # title (no clean subject found), search the title as-is.
+    if keyword and keyword.lower() != topic.lower():
+        q = keyword
+    else:
+        q = topic
+
     if key_points and len(q) < 80:
         snippet = key_points.strip().split(".")[0][:80]
         q = f"{q} {snippet}".strip()
@@ -157,8 +235,11 @@ _DEMO_QUERY_SUFFIX = "demo screen recording"
 
 
 def _demo_query(topic: str) -> str:
-    """A demo-biased variant of the topic query for the extra video pass."""
-    return f"{topic.strip()} {_DEMO_QUERY_SUFFIX}".strip()
+    """A demo-biased variant of the query for the extra video pass. Leads
+    with the auto-detected keyword (same as _build_query) so the demo search
+    locks onto the real subject, not the clickbait tail."""
+    keyword = extract_keyword(topic) or topic.strip()
+    return f"{keyword} {_DEMO_QUERY_SUFFIX}".strip()
 
 
 def discover_for_topic(topic: str, key_points: str) -> dict:
@@ -224,8 +305,10 @@ def discover_for_topic(topic: str, key_points: str) -> dict:
     videos = [c for c in all_candidates if c.get("kind") == "video"]
     images = [c for c in all_candidates if c.get("kind") == "image"]
 
-    v_winner, v_backups = pick_best(videos, matched_brands=matched)
-    i_winner, i_backups = pick_best(images, matched_brands=matched)
+    v_winner, v_backups = pick_best(
+        videos, matched_brands=matched, topic=topic, context=key_points)
+    i_winner, i_backups = pick_best(
+        images, matched_brands=matched, topic=topic, context=key_points)
 
     return {
         "matched_brands": matched,

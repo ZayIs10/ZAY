@@ -5,6 +5,7 @@ Deterministic. No LLM, no ML. Tweak SOURCE_WEIGHTS to change priorities.
 
 from __future__ import annotations
 
+import re
 from typing import Iterable
 
 
@@ -75,10 +76,115 @@ def _demo_signal(candidate: dict) -> int:
     return delta
 
 
-def score(candidate: dict, *, matched_brands: list[str] | None = None) -> int:
+# --- Topic relevance signal ------------------------------------------------
+# THE bug this fixes: search for "Claude Opus 4.8" but a clip titled "Claude
+# builds 3D worlds" wins because it's a demo with views. The query used the
+# keyword, but the WINNER was picked without ever checking the clip's title
+# against the topic. A clip must literally be about the thing the topic names
+# (the user's locked rule: visuals must match the voiceover). So we compare
+# the candidate title to the topic's keywords and reward overlap / punish a
+# total mismatch — heavily weighting DISTINCTIVE tokens (version numbers like
+# "4.8", product names) over common English words.
+
+# Words too generic to prove a clip is on-topic. Matching only these is NOT
+# relevance (e.g. "AI", "Claude" appear in every clip in this niche).
+_RELEVANCE_STOPWORDS: frozenset[str] = frozenset({
+    "the", "a", "an", "and", "or", "of", "to", "for", "in", "on", "with",
+    "is", "are", "now", "your", "you", "how", "what", "new", "just", "this",
+    "that", "it", "its", "by", "at", "as", "be", "can", "will", "from",
+    "ai", "claude", "anthropic",  # niche-universal -> not distinctive
+})
+
+# A version-like token: 4.8, v2, gpt-5, 4o, 3.5 ... these are the strongest
+# possible on-topic signal and a clip missing the right one is the classic
+# wrong-clip bug ("Opus 4.8" footage vs "Opus 4.5" footage).
+_VERSION_RE = re.compile(r"^v?\d+(\.\d+)*[a-z]?$|^\d+[a-z]$", re.IGNORECASE)
+
+RELEVANCE_TERM_BONUS = 14   # per distinctive topic word found in the title
+RELEVANCE_VERSION_BONUS = 30  # a matching version number is decisive
+RELEVANCE_MISS_PENALTY = 60   # title shares NO distinctive topic word -> sink it
+RELEVANCE_MAX_BONUS = 50      # cap the cumulative term bonus
+
+
+def topic_keywords(topic: str) -> tuple[set[str], set[str]]:
+    """Split a topic into (distinctive_words, version_tokens).
+
+    distinctive_words: lowercased content words minus niche-universal stopwords.
+    version_tokens: tokens that look like a version/model number (4.8, gpt-5).
+    """
+    words: set[str] = set()
+    versions: set[str] = set()
+    for raw in re.findall(r"[A-Za-z0-9.\-]+", topic or ""):
+        bare = raw.strip(".-").lower()
+        if not bare:
+            continue
+        if _VERSION_RE.match(bare):
+            versions.add(bare)
+            continue
+        if bare in _RELEVANCE_STOPWORDS or len(bare) < 3:
+            continue
+        words.add(bare)
+    return words, versions
+
+
+def _relevance_signal(candidate: dict, topic: str, context: str = "") -> int:
+    """Score how well a candidate's title matches the topic keywords.
+
+    `context` (e.g. the row's Key Points) widens the legitimate-match
+    vocabulary so a clip phrased differently from the title — "Claude
+    QuickBooks demo" for topic "Claude Runs Your Small Business" — isn't
+    wrongly sunk. Version numbers still come only from the TOPIC (the
+    decisive signal); context only adds extra content words.
+
+    Returns a positive boost for on-topic clips and a hard negative for a
+    title that shares no distinctive topic word at all (the off-topic clip
+    that should never win). Returns 0 when there's no topic to compare or no
+    title (can't judge -> don't penalize)."""
+    title = str(candidate.get("title") or "")
+    if not topic or not title:
+        return 0
+    words, versions = topic_keywords(topic)
+    if context:
+        ctx_words, ctx_versions = topic_keywords(context)
+        words = words | ctx_words
+        versions = versions | ctx_versions
+    if not words and not versions:
+        return 0
+
+    title_l = title.lower()
+    title_tokens = {
+        t.strip(".-").lower()
+        for t in re.findall(r"[A-Za-z0-9.\-]+", title_l)
+    }
+
+    delta = 0
+    matched_terms = sum(1 for w in words if w in title_l)
+    delta += min(matched_terms * RELEVANCE_TERM_BONUS, RELEVANCE_MAX_BONUS)
+
+    # Version numbers are decisive: the right one is a strong boost.
+    if versions:
+        if versions & title_tokens:
+            delta += RELEVANCE_VERSION_BONUS
+
+    # A title that shares NO distinctive topic word is off-topic — sink it.
+    if matched_terms == 0 and not (versions & title_tokens):
+        delta -= RELEVANCE_MISS_PENALTY
+
+    return delta
+
+
+def score(
+    candidate: dict,
+    *,
+    matched_brands: list[str] | None = None,
+    topic: str | None = None,
+    context: str = "",
+) -> int:
     """Return a numeric score for a single candidate (higher is better).
 
     Includes boosts/penalties:
+      - title matches topic keywords (esp. version numbers) -> big boost
+      - title shares NO distinctive topic word -> big penalty (off-topic)
       - YouTube channel matches a brand mentioned in topic -> +10
       - view_count > 100k -> +5
       - video duration > 600s -> -10
@@ -89,6 +195,12 @@ def score(candidate: dict, *, matched_brands: list[str] | None = None) -> int:
     base = 100 if _is_brand_official(src) else SOURCE_WEIGHTS.get(src, 10)
 
     extra = candidate.get("extra") or {}
+
+    # Topic relevance — applies to BOTH video and image candidates so an
+    # off-topic still doesn't win either. This is the primary fix for the
+    # "searched X, got a clip about Y" bug.
+    if topic:
+        base += _relevance_signal(candidate, topic, context)
 
     # YouTube boosts
     if src == "youtube":
@@ -125,6 +237,8 @@ def rank(
     candidates: Iterable[dict],
     *,
     matched_brands: list[str] | None = None,
+    topic: str | None = None,
+    context: str = "",
 ) -> list[dict]:
     """Return candidates sorted by score (desc), then by image area
     (desc) as a tiebreak.
@@ -139,7 +253,7 @@ def rank(
         deduped.append(c)
 
     def sort_key(c: dict) -> tuple:
-        s = score(c, matched_brands=matched_brands)
+        s = score(c, matched_brands=matched_brands, topic=topic, context=context)
         area = (c.get("width") or 0) * (c.get("height") or 0)
         # Negate so higher = earlier under ascending sort
         return (-s, -area)
@@ -151,11 +265,14 @@ def pick_best(
     candidates: Iterable[dict],
     *,
     matched_brands: list[str] | None = None,
+    topic: str | None = None,
+    context: str = "",
 ) -> tuple[dict | None, list[dict]]:
     """Return (winner, backups) where backups are the next-best entries
     (max 4). Returns (None, []) when candidates is empty.
     """
-    ranked = rank(candidates, matched_brands=matched_brands)
+    ranked = rank(candidates, matched_brands=matched_brands,
+                  topic=topic, context=context)
     if not ranked:
         return None, []
     return ranked[0], ranked[1:5]

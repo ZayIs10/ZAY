@@ -101,7 +101,8 @@ def find_beat_clips(
         except Exception as exc:  # noqa: BLE001
             log.warning("beat %d general search failed: %s", beat.index, exc)
 
-        ranked = rank(candidates, matched_brands=matched)
+        ranked = rank(candidates, matched_brands=matched,
+                      topic=topic, context=beat.text)
         # Pick the best clip not already used by an earlier beat.
         pick = None
         for c in ranked:
