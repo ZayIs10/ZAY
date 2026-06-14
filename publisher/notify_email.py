@@ -59,21 +59,56 @@ def send(subject: str, body: str) -> bool:
 
 
 def build_review_email(
-    *, topic: str, caption: str, drive_url: str
+    *, topic: str, caption: str, drive_url: str,
+    staged_ok: bool = False, stage_detail: str = "",
 ) -> tuple[str, str]:
     """Compose the (subject, body) for a 'reel ready to review' email.
 
     `caption` is the full Post Caption from the sheet — it already includes
     the hashtags, so it's sent verbatim as one copy-paste-ready block.
+
+    `staged_ok` True means the reel was uploaded to Instagram as a staged
+    container (caption already attached) and the user just has to tap Publish
+    in the app. False means staging was skipped/failed and the user should
+    post manually from the Drive link — `stage_detail` says why.
     """
-    subject = f"[GenZ reel ready to review] {topic}"
+    if staged_ok:
+        subject = f"[GenZ reel STAGED on IG — tap Publish] {topic}"
+    else:
+        subject = f"[GenZ reel ready to review] {topic}"
 
     caption_block = caption.strip() or "(no caption in sheet)"
+
+    if staged_ok:
+        ig_block = (
+            "INSTAGRAM: STAGED & READY — JUST TAP PUBLISH\n"
+            "------------------------------------------------------------\n"
+            "The reel (with the caption below already attached) is uploaded to\n"
+            "your Instagram and processed. To post it:\n"
+            "  1. Open the Instagram app.\n"
+            "  2. It's staged via the API — open your drafts/scheduled area or\n"
+            "     the create flow; the video + caption are already prepared.\n"
+            "  3. Review and tap Publish.\n"
+            "Nothing goes live until you tap Publish.\n\n"
+            "(If you don't see it staged in the app, just post manually from\n"
+            "the Drive link above — the caption below is copy-paste ready.)\n"
+        )
+    else:
+        reason = f" ({stage_detail})" if stage_detail else ""
+        ig_block = (
+            "INSTAGRAM: NOT STAGED — POST MANUALLY FROM DRIVE\n"
+            "------------------------------------------------------------\n"
+            f"Auto-staging to Instagram didn't run{reason}.\n"
+            "Download the reel from the Drive link above and post it yourself;\n"
+            "the caption below is copy-paste ready (includes hashtags).\n"
+        )
 
     body = (
         f"Your reel for \"{topic}\" is rendered and uploaded.\n\n"
         f"WATCH / DOWNLOAD:\n{drive_url}\n\n"
         f"------------------------------------------------------------\n"
+        f"{ig_block}"
+        f"\n------------------------------------------------------------\n"
         f"INSTAGRAM CAPTION (copy-paste ready — includes hashtags)\n"
         f"------------------------------------------------------------\n"
         f"{caption_block}\n"

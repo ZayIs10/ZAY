@@ -394,27 +394,61 @@ def run(row_index: int | None, *, topic: str | None = None, dry_run: bool) -> in
     )
     _try_update(reader, row_index, "Status", DONE_STATUS)
 
-    # Email the user a review draft: Drive link + the caption + hashtags that
-    # are ALREADY in the sheet row (drafted upstream by research). Best-effort —
-    # a notify failure must never undo an otherwise-successful render.
-    _send_review_email(row, download_url)
+    # Stage the reel onto Instagram (upload + process, but DO NOT publish).
+    # The user's rule: "Stage only, I tap Publish." Best-effort — if the IG
+    # token is expired or anything fails, the render + Drive + email still
+    # stand; the email just tells the user to post from Drive instead.
+    stage = _stage_on_instagram(reader, row_index, download_url, row)
+
+    # Email the user: Drive link + the Post Caption (with hashtags), and
+    # whether the reel is staged on IG ready to tap Publish, or needs manual
+    # posting. Best-effort — a notify failure must never undo a good render.
+    _send_review_email(row, download_url, stage)
 
     log.info("Done. Row %d -> Status=%s, mp4=%s", row_index, DONE_STATUS, download_url)
     return 0
 
 
-def _send_review_email(row: dict, drive_url: str) -> None:
+def _stage_on_instagram(reader, row_index: int, video_url: str, row: dict):
+    """Best-effort: stage the reel on IG (no publish) and record the outcome
+    in the sheet. Returns the StageResult (ok=False on any failure)."""
+    from publisher.stage_instagram import stage_reel  # late import
+
+    caption = (row.get("Post Caption") or "").strip()
+    result = stage_reel(video_url, caption)
+    if result.ok:
+        _try_update(reader, row_index, "Instagram Post ID", result.container_id)
+        _try_update(reader, row_index, "Instagram Post",
+                    "Staged - tap Publish in IG")
+        log.info("Row %d staged on IG (container=%s).",
+                 row_index, result.container_id)
+    else:
+        _try_update(reader, row_index, "Instagram Post",
+                    f"Not staged - post from Drive ({result.detail})"[:200])
+        log.warning("Row %d IG staging skipped/failed: %s",
+                    row_index, result.detail)
+    return result
+
+
+def _send_review_email(row: dict, drive_url: str, stage=None) -> None:
     """Compose + send the 'ready to review' email from the row's own fields.
 
     Post Caption already contains the hashtags (the sheet keeps them in one
     field), so it's emailed verbatim as a single copy-paste-ready block.
+    `stage` (a StageResult or None) tells the email whether the reel is staged
+    on Instagram ready to publish, or needs manual posting from Drive.
     """
     from publisher.notify_email import build_review_email, send  # late import
+
+    staged_ok = bool(stage and getattr(stage, "ok", False))
+    stage_detail = getattr(stage, "detail", "") if stage else ""
 
     subject, body = build_review_email(
         topic=(row.get("Topic") or "").strip(),
         caption=(row.get("Post Caption") or "").strip(),
         drive_url=drive_url,
+        staged_ok=staged_ok,
+        stage_detail=stage_detail,
     )
     send(subject, body)
 

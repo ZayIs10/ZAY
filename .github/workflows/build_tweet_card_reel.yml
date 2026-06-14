@@ -37,6 +37,11 @@ jobs:
       GOOGLE_SHEET_REELS_NAME: Reels
       YOUTUBE_COOKIES_FILE: youtube_cookies.txt
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      # Instagram staging (upload + process the reel; the user taps Publish).
+      # If unset the build still succeeds — it skips IG staging and the review
+      # email tells the user to post from the Drive link instead.
+      INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
+      INSTAGRAM_IG_USER_ID: ${{ secrets.INSTAGRAM_IG_USER_ID }}
       # Review-email notifier (Gmail SMTP, app password). If these secrets are
       # unset the build still succeeds — it just skips the email.
       GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
