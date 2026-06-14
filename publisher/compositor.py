@@ -43,6 +43,21 @@ VIDEO_W = 960
 VIDEO_H = 900
 
 
+# How the source clip is fitted into the VIDEO_W x VIDEO_H window.
+#
+# We FIT THE WHOLE FRAME (letterbox) — never crop the sides. A YouTube clip is
+# usually 16:9 (very wide); the window is near-square (960x900). Filling the
+# window (scale-to-cover + crop) chopped ~40% off the left/right, cutting out
+# people standing to one side and on-screen text near the edges — the exact
+# bug the user reported. So instead we scale the whole frame DOWN to fit inside
+# the window (force_original_aspect_ratio=decrease) and pad the leftover space
+# with black bars, clip centered. Nothing on the sides is ever lost.
+_FIT_FILTER = (
+    f"scale={VIDEO_W}:{VIDEO_H}:force_original_aspect_ratio=decrease,"
+    f"pad={VIDEO_W}:{VIDEO_H}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1"
+)
+
+
 _DUR_RX = __import__("re").compile(
     r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)"
 )
@@ -138,10 +153,7 @@ def build(
         preview_seconds, src_play_dur, max_seconds, total_dur,
     )
 
-    crop_filter = (
-        f"scale={VIDEO_W}:{VIDEO_H}:force_original_aspect_ratio=increase,"
-        f"crop={VIDEO_W}:{VIDEO_H},setsar=1"
-    )
+    crop_filter = _FIT_FILTER
 
     keep_audio = has_audio(source_video)
     log.info("Source audio: %s", "present -> kept" if keep_audio else "none -> silent")
@@ -235,10 +247,7 @@ def _build_beat_segment(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     keep_audio = has_audio(clip)
 
-    crop_filter = (
-        f"scale={VIDEO_W}:{VIDEO_H}:force_original_aspect_ratio=increase,"
-        f"crop={VIDEO_W}:{VIDEO_H},setsar=1"
-    )
+    crop_filter = _FIT_FILTER
     video_graph = (
         f"[1:v]{crop_filter},fps=30,trim=duration={seconds:.2f},"
         f"setpts=PTS-STARTPTS[clip];"
