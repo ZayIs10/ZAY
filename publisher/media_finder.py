@@ -233,19 +233,75 @@ def _build_query(topic: str, key_points: str) -> str:
     else:
         q = topic
 
-    # Add the STORY CONCEPT terms (funding/valuation/lawsuit/...) so the search
-    # pool contains footage about what the news is ABOUT, not just the brand.
-    # For "Anthropic Is Now Worth Almost $1 Trillion" this appends
-    # "funding valuation billion ..." so valuation clips surface instead of a
-    # random product demo. Empty when no concept matched.
+    # When the story has a CONCEPT (valuation/lawsuit/...), build a FOCUSED
+    # query: the subject anchor + the most distinctive topic tokens + a couple
+    # of concept terms. A focused "Anthropic trillion valuation" finds the
+    # exact clip ("Anthropic Is Now Worth Almost $1 Trillion"); the old bloated
+    # "Anthropic Is Now Worth Almost $1 Trillion funding valuation billion
+    # investment news <key points>" diluted the search and returned generic
+    # brand clips. Concept queries deliberately SKIP the key-points padding.
     concept = _concept_terms(topic, key_points)
-    if concept and len(q) < 70:
-        q = f"{q} {concept}".strip()
+    if concept:
+        anchor = _subject_anchor(topic)            # brand/proper-noun lead
+        topic_bits = _distinctive_topic_bits(topic, skip=anchor)  # "trillion"
+        concept_lead = " ".join(concept.split()[:2])  # 2 concept words
+        # Assemble, dropping duplicate tokens (case-insensitive) so an anchor
+        # that also appears in topic_bits doesn't become "Anthropic Anthropic".
+        seen: set[str] = set()
+        parts: list[str] = []
+        for chunk in (anchor, topic_bits, concept_lead):
+            for w in chunk.split():
+                if w.lower() not in seen:
+                    seen.add(w.lower())
+                    parts.append(w)
+        focused = " ".join(parts).strip()
+        return focused or q
 
+    # No concept: keep the prior behavior (lead term + a short key-points hint).
     if key_points and len(q) < 80:
         snippet = key_points.strip().split(".")[0][:80]
         q = f"{q} {snippet}".strip()
     return q
+
+
+def _subject_anchor(topic: str) -> str:
+    """The leading proper-noun/brand of a topic ("Anthropic Is Now..." ->
+    "Anthropic"). Falls back to the extracted keyword, then the first word."""
+    for tok in topic.split():
+        bare = tok.strip(".,!?:")
+        if bare and bare[0].isupper() and bare.lower() not in _STOPWORDS:
+            return bare
+    kw = extract_keyword(topic)
+    return kw.split()[0] if kw else (topic.split()[0] if topic.split() else "")
+
+
+def _distinctive_topic_bits(topic: str, skip: str = "") -> str:
+    """The 1-2 most distinctive content tokens from the topic (skip filler),
+    e.g. "Anthropic Is Now Worth Almost $1 Trillion" -> "Trillion". Numbers and
+    long words win; this keeps the focused query specific without the filler
+    ("is/now/worth/almost") that pollutes YouTube ranking. `skip` drops the
+    anchor word so it isn't repeated and doesn't waste a slot. A lone short
+    number ("1") is kept only if nothing better is found — a word like
+    "trillion" is far more useful than "1"."""
+    skip_l = skip.strip().lower()
+    strong: list[str] = []   # words >=5 chars / version tokens
+    weak: list[str] = []     # bare short numbers ("1") — last resort
+    # Keep version/decimal tokens whole ("4.8", "3.5") — a bare \w+ split would
+    # break "4.8" into "4" and "8" and lose the decisive version signal.
+    for tok in re.findall(r"[A-Za-z]+|\d+(?:\.\d+)*", topic):
+        low = tok.lower()
+        if low == skip_l:
+            continue
+        if low in _STOPWORDS or low in {"almost", "now", "worth", "is", "are"}:
+            continue
+        if len(low) >= 5 or ("." in tok):       # words / version numbers
+            strong.append(tok)
+        elif tok[0].isdigit():                   # bare short number
+            weak.append(tok)
+        if len(strong) >= 2:
+            break
+    bits = strong[:2] or weak[:1]
+    return " ".join(bits)
 
 
 # Appended to a SECOND video search pass so the candidate pool actually
