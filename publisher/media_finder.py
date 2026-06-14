@@ -201,6 +201,18 @@ def extract_keyword(topic: str) -> str:
     return t
 
 
+def _concept_terms(topic: str, key_points: str) -> str:
+    """Story-concept search terms for the query (funding/valuation/...).
+    Defensive: returns '' if the concept module is unavailable so the finder
+    degrades to plain keyword search instead of breaking."""
+    try:
+        from publisher.media_sources.topic_concept import concept_query_terms
+        return concept_query_terms(topic, key_points)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("concept terms unavailable: %s", exc)
+        return ""
+
+
 def _build_query(topic: str, key_points: str) -> str:
     """Compose the YouTube search query.
 
@@ -220,6 +232,15 @@ def _build_query(topic: str, key_points: str) -> str:
         q = keyword
     else:
         q = topic
+
+    # Add the STORY CONCEPT terms (funding/valuation/lawsuit/...) so the search
+    # pool contains footage about what the news is ABOUT, not just the brand.
+    # For "Anthropic Is Now Worth Almost $1 Trillion" this appends
+    # "funding valuation billion ..." so valuation clips surface instead of a
+    # random product demo. Empty when no concept matched.
+    concept = _concept_terms(topic, key_points)
+    if concept and len(q) < 70:
+        q = f"{q} {concept}".strip()
 
     if key_points and len(q) < 80:
         snippet = key_points.strip().split(".")[0][:80]

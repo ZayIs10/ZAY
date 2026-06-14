@@ -105,6 +105,30 @@ RELEVANCE_VERSION_BONUS = 30  # a matching version number is decisive
 RELEVANCE_MISS_PENALTY = 60   # title shares NO distinctive topic word -> sink it
 RELEVANCE_MAX_BONUS = 50      # cap the cumulative term bonus
 
+# Concept (story-type) matching. For abstract topics whose literal words never
+# appear in any clip title ("Worth Almost $1 Trillion"), we match the STORY
+# TYPE instead: a valuation story should pull funding/valuation footage, not a
+# product demo. A title carrying the concept's terms is on-concept.
+CONCEPT_TITLE_BONUS = 22   # per concept term in the title (caps below)
+CONCEPT_MAX_BONUS = 44     # cap cumulative concept bonus
+
+
+def _concept_title_terms(topic: str, context: str = "") -> set[str]:
+    """Concept (story-type) title terms for `topic` (+context). Imported
+    lazily and defensively so a missing/erroring concept module degrades to
+    plain keyword behavior instead of breaking media-finding."""
+    try:
+        from publisher.media_sources.topic_concept import concept_title_terms
+    except Exception:  # noqa: BLE001
+        try:
+            from topic_concept import concept_title_terms  # flat import
+        except Exception:  # noqa: BLE001
+            return set()
+    try:
+        return concept_title_terms(topic, context)
+    except Exception:  # noqa: BLE001
+        return set()
+
 
 def topic_keywords(topic: str) -> tuple[set[str], set[str]]:
     """Split a topic into (distinctive_words, version_tokens).
@@ -166,8 +190,24 @@ def _relevance_signal(candidate: dict, topic: str, context: str = "") -> int:
         if versions & title_tokens:
             delta += RELEVANCE_VERSION_BONUS
 
-    # A title that shares NO distinctive topic word is off-topic — sink it.
-    if matched_terms == 0 and not (versions & title_tokens):
+    # Concept (story-type) match: for abstract topics whose literal words never
+    # appear in a clip title ("Worth Almost $1 Trillion"), reward a title that
+    # carries the story's concept terms (funding/valuation/etc.). This is how a
+    # valuation clip wins over a product demo. Concept terms come from the
+    # TOPIC + context via topic_concept.concept_title_terms().
+    concept_terms = _concept_title_terms(topic, context)
+    on_concept = False
+    if concept_terms:
+        concept_hits = sum(1 for t in concept_terms if t in title_l)
+        if concept_hits:
+            on_concept = True
+            delta += min(concept_hits * CONCEPT_TITLE_BONUS, CONCEPT_MAX_BONUS)
+
+    # A title that shares NO distinctive topic word AND is not on-concept is
+    # off-topic — sink it. (An on-concept clip is spared the penalty even if it
+    # lacks the literal topic words, e.g. "$183 billion" footage for a
+    # "$1 trillion" story.)
+    if matched_terms == 0 and not (versions & title_tokens) and not on_concept:
         delta -= RELEVANCE_MISS_PENALTY
 
     return delta
