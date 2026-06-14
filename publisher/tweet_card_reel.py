@@ -138,23 +138,68 @@ def _find_row_by_topic(reader: SheetsReader, topic: str) -> dict:
     breaks if the sheet is sorted/inserted/deleted between firing and building
     — the bug where 'build Opus 4.8' actually rendered the billionaire row.
     """
-    want = topic.strip().lower()
+    def _norm(s: str) -> str:
+        # Collapse any run of whitespace to one space, lowercase, trim. This
+        # survives a topic that arrived with a mangled space (e.g. a shell ate
+        # a "$1", leaving "Almost  Trillion" with a double space).
+        return re.sub(r"\s+", " ", str(s)).strip().lower()
+
+    def _words(s: str) -> list[str]:
+        # Alphanumeric word tokens, lowercased. "Almost $1 Trillion" ->
+        # ["almost", "1", "trillion"]; "Almost  Trillion" -> ["almost",
+        # "trillion"].
+        return re.findall(r"[a-z0-9]+", str(s).lower())
+
+    def _is_subseq(small: list[str], big: list[str]) -> bool:
+        # True if every token of `small` appears in `big` in order (a dropped
+        # token like "$1" just means small is missing one of big's words).
+        it = iter(big)
+        return all(tok in it for tok in small)
+
+    want = _norm(topic)
     all_values = reader.ws.get_all_values()
     if not all_values:
         raise RuntimeError("Sheet is empty")
     headers = all_values[0]
-    matches = []
+
+    rows = []
     for i, raw in enumerate(all_values[1:], start=2):
         row = {headers[j]: raw[j] if j < len(raw) else "" for j in range(len(headers))}
-        if str(row.get("Topic", "")).strip().lower() == want:
-            row["_row_index"] = i
-            matches.append(row)
+        row["_row_index"] = i
+        rows.append(row)
+
+    # 1) Exact (whitespace-normalized) match — the normal path.
+    matches = [r for r in rows if _norm(r.get("Topic", "")) == want]
+
+    # 2) Forgiving fallback: a topic with a symbol/number lost in transit
+    #    ("Almost $1 Trillion" -> "Almost  Trillion"). Accept a sheet row whose
+    #    Topic words are a SUPERSET of the received words in order (i.e. only a
+    #    token was dropped). ONLY accept when it resolves to exactly one row —
+    #    never guess between several. This won't merge "Opus 4.8" vs "Opus
+    #    4.5" because their differing digit tokens break the subsequence.
+    if not matches:
+        want_words = _words(topic)
+        if want_words:
+            loose_hits = [
+                r for r in rows
+                if _is_subseq(want_words, _words(r.get("Topic", "")))
+            ]
+            if len(loose_hits) == 1:
+                log.warning(
+                    "Topic %r had no exact match; matched row %d via "
+                    "word-subsequence fallback (likely a $/number lost in "
+                    "transit). Sheet Topic: %r",
+                    topic, loose_hits[0]["_row_index"],
+                    loose_hits[0].get("Topic"),
+                )
+                matches = loose_hits
+
     if not matches:
         raise RuntimeError(f"No row found with Topic == {topic!r}")
     if len(matches) > 1:
-        rows = ", ".join(str(m["_row_index"]) for m in matches)
+        idxs = ", ".join(str(m["_row_index"]) for m in matches)
         raise RuntimeError(
-            f"Topic {topic!r} matches {len(matches)} rows ({rows}); "
+            f"Topic {topic!r} matches {len(matches)} rows ({idxs}); "
             "Topic must be unique to build by topic."
         )
     return matches[0]

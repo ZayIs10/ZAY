@@ -129,15 +129,26 @@ jobs:
           fi
 
       - name: Build reel
+        env:
+          # Pass the topic through the ENV, not inline ${{ }} interpolation.
+          # GitHub substitutes ${{ }} into the script as literal text BEFORE
+          # bash runs, so a topic containing "$1" (e.g. "Worth Almost $1
+          # Trillion") would be eaten by the shell as a positional parameter —
+          # the exact bug that made the topic arrive as "Almost  Trillion" and
+          # match no row. A double-quoted env var is never re-expanded, so the
+          # "$1" survives intact.
+          TOPIC: ${{ steps.target.outputs.topic }}
+          ROW: ${{ steps.target.outputs.row }}
+          MODE: ${{ steps.target.outputs.mode }}
         run: |
           set -o pipefail   # fail the step if python fails, not just tee
           mkdir -p logs renders
-          if [ "${{ steps.target.outputs.mode }}" = "topic" ]; then
-            python publisher/tweet_card_reel.py --topic "${{ steps.target.outputs.topic }}" 2>&1 \
+          if [ "$MODE" = "topic" ]; then
+            python publisher/tweet_card_reel.py --topic "$TOPIC" 2>&1 \
               | tee "logs/tweet_card_reel.log"
           else
-            python publisher/tweet_card_reel.py --row "${{ steps.target.outputs.row }}" 2>&1 \
-              | tee "logs/tweet_card_reel_row${{ steps.target.outputs.row }}.log"
+            python publisher/tweet_card_reel.py --row "$ROW" 2>&1 \
+              | tee "logs/tweet_card_reel_row${ROW}.log"
           fi
 
       - name: Upload logs
