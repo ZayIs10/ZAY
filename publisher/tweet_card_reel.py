@@ -216,7 +216,14 @@ def build_reel_for_row(row: dict) -> Path:
     """
     row_index = row["_row_index"]
     topic = (row.get("Topic") or "").strip()
-    caption = (row.get("Post Caption") or "").strip()
+    # On-screen card text = Reel Caption (col 29): the words that sit ON the
+    # reel video, no hashtags, explaining the update + how to use it. The Post
+    # Caption (col 30) is the IG text-box caption with hashtags and must NOT be
+    # burned onto the video. Fall back to Post Caption only if Reel Caption is
+    # empty so legacy rows still render.
+    card_text = (row.get("Reel Caption") or "").strip()
+    if not card_text:
+        card_text = (row.get("Post Caption") or "").strip()
     video_url = (row.get("Media Video URL") or "").strip()
     image_url = (row.get("Media Image URL") or "").strip()
 
@@ -228,8 +235,10 @@ def build_reel_for_row(row: dict) -> Path:
     missing = []
     if not topic:
         missing.append("Topic")
-    if not caption:
-        missing.append("Post Caption")
+    if not card_text:
+        # Either column satisfies this — card_text already fell back to
+        # Post Caption above, so an empty here means BOTH are blank.
+        missing.append("Reel Caption / Post Caption")
     if not video_url:
         missing.append("Media Video URL")
     if missing:
@@ -282,7 +291,7 @@ def build_reel_for_row(row: dict) -> Path:
     card_png = TMP_DIR / f"{slug}_card.png"
     log.info("Rendering tweet card -> %s", card_png.name)
     render_card(
-        caption,
+        card_text,
         handle="@genzcapital",
         display_name="Gen Z Capital",
         avatar_path=LOGO_PATH,
