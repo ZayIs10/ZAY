@@ -39,7 +39,13 @@ def send(subject: str, body: str) -> bool:
         )
         return False
 
-    recipient = os.getenv("NOTIFY_TO", sender)
+    # NOTIFY_TO may be PRESENT-but-EMPTY (the GitHub workflow always sets the
+    # env var, even when the secret is unset -> ""). os.getenv's default only
+    # kicks in when the var is missing, not when it's "", so an empty value
+    # would make the recipient blank and Gmail rejects it with
+    # "555 5.5.2 Syntax error, cannot decode response". Fall back to the sender
+    # whenever NOTIFY_TO is empty/whitespace.
+    recipient = (os.getenv("NOTIFY_TO") or "").strip() or sender
 
     msg = EmailMessage()
     msg["Subject"] = subject
