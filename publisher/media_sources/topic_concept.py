@@ -81,6 +81,26 @@ CONCEPTS: list[dict] = [
         ],
     },
     {
+        "name": "benchmark",
+        # Performance / test score / capability milestone stories.
+        # "Claude Scored 97% on the Math Olympiad", "GPT-5 Aces the Bar Exam",
+        # "Gemini Beats GPT-4 on Coding". Separate from launch so the query
+        # points at competition/test footage, not product-demo footage.
+        "triggers": [
+            "scored", "scores", "score", "benchmark", "benchmarks",
+            "beats", "beat", "outperforms", "outperformed", "surpasses",
+            "surpassed", "tops", "aces", "passed", "passes", "accuracy",
+            "state-of-the-art", "sota", "math olympiad", "olympiad",
+            "exam", "test", "competition", "record", "milestone",
+            "performance", "percent", "%",
+        ],
+        "query_terms": "benchmark test performance score",
+        "title_terms": [
+            "benchmark", "score", "test", "performance", "beats", "outperforms",
+            "accuracy", "exam", "olympiad", "record", "milestone", "percent",
+        ],
+    },
+    {
         "name": "launch",
         # A product/model release or capability — the DEMO case. Last so the
         # more specific business concepts above win as primary when present.
@@ -88,7 +108,7 @@ CONCEPTS: list[dict] = [
             "launch", "launches", "introducing", "releases", "released",
             "drops", "dropped", "unveils", "announces", "new model",
             "now does", "can now", "update", "feature", "builds", "runs",
-            "writes", "codes", "generates",
+            "writes", "codes", "generates", "just dropped", "just released",
         ],
         "query_terms": "demo launch feature",
         "title_terms": [
