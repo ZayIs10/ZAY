@@ -79,7 +79,7 @@ def build_review_email(
     post manually from the Drive link — `stage_detail` says why.
     """
     if staged_ok:
-        subject = f"[GenZ reel STAGED on IG — tap Publish] {topic}"
+        subject = f"[GenZ reel SCHEDULED on IG — review in Meta Planner] {topic}"
     else:
         subject = f"[GenZ reel ready to review] {topic}"
 
@@ -87,24 +87,24 @@ def build_review_email(
 
     if staged_ok:
         ig_block = (
-            "INSTAGRAM: STAGED & READY — JUST TAP PUBLISH\n"
+            "INSTAGRAM: SCHEDULED FOR +24 HOURS\n"
             "------------------------------------------------------------\n"
-            "The reel (with the caption below already attached) is uploaded to\n"
-            "your Instagram and processed. To post it:\n"
-            "  1. Open the Instagram app.\n"
-            "  2. It's staged via the API — open your drafts/scheduled area or\n"
-            "     the create flow; the video + caption are already prepared.\n"
-            "  3. Review and tap Publish.\n"
-            "Nothing goes live until you tap Publish.\n\n"
-            "(If you don't see it staged in the app, just post manually from\n"
-            "the Drive link above — the caption below is copy-paste ready.)\n"
+            "The reel is scheduled to auto-publish in 24 hours.\n"
+            "To review it before it goes live:\n"
+            "  1. Go to business.facebook.com/latest/content_scheduler\n"
+            "  2. Find the scheduled post in the Planner calendar.\n"
+            "  3. Tap it to preview the video + caption.\n"
+            "  4. If it looks good — do nothing, it posts automatically.\n"
+            "  5. If you want to cancel — tap the post and click Delete.\n\n"
+            "(If you don't see it in the Planner, use the Drive link below\n"
+            "to post manually — the caption is copy-paste ready.)\n"
         )
     else:
         reason = f" ({stage_detail})" if stage_detail else ""
         ig_block = (
-            "INSTAGRAM: NOT STAGED — POST MANUALLY FROM DRIVE\n"
+            "INSTAGRAM: NOT SCHEDULED — POST MANUALLY FROM DRIVE\n"
             "------------------------------------------------------------\n"
-            f"Auto-staging to Instagram didn't run{reason}.\n"
+            f"Auto-scheduling to Instagram didn't run{reason}.\n"
             "Download the reel from the Drive link above and post it yourself;\n"
             "the caption below is copy-paste ready (includes hashtags).\n"
         )

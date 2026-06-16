@@ -202,6 +202,33 @@ def create_reel_container(ig_user_id: str, access_token: str,
     return container_id
 
 
+def schedule_reel(ig_user_id: str, access_token: str,
+                  video_url: str, caption: str,
+                  scheduled_publish_time: int) -> str:
+    """Create container, wait for FINISHED, then schedule it for a future time.
+
+    `scheduled_publish_time` is a Unix timestamp (must be 10 min–75 days ahead).
+    Returns the media_id of the scheduled post (visible in Meta Business Suite).
+    """
+    container_id = create_reel_container(ig_user_id, access_token, video_url, caption)
+    wait_for_container(container_id, access_token)
+    print(f"Scheduling reel for Unix time {scheduled_publish_time}...")
+    resp = requests.post(
+        f"{GRAPH_BASE}/{ig_user_id}/media_publish",
+        params={
+            "creation_id": container_id,
+            "scheduled_publish_time": scheduled_publish_time,
+            "access_token": access_token,
+        },
+        timeout=60,
+    )
+    if resp.status_code != 200:
+        sys.exit(f"Schedule failed: {resp.status_code}\n{resp.text}")
+    media_id = resp.json().get("id", "")
+    print(f"  Scheduled. media_id={media_id}")
+    return media_id
+
+
 def wait_for_container(container_id: str, access_token: str,
                        max_wait_s: int = 600) -> None:
     """Poll container status until FINISHED. Reels need server-side processing."""
