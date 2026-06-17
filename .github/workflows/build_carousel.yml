@@ -1,0 +1,107 @@
+name: Build Carousel (Method A images)
+
+# CAROUSEL sibling of build_tweet_card_reel.yml. Runs the @evolving.ai
+# "reference-first" image pipeline in the cloud (never the user's laptop):
+#   spec -> per slide: find real reference (media_finder) -> GPT-4o vision
+#   writes house-style prompt -> OpenAI image -> render deck -> (optional) Drive.
+#
+# Fired by n8n via repository_dispatch once a carousel row is "Ready to Run",
+# or manually from the Actions UI. The spec to build is passed as the client
+# payload `spec` (a repo-relative path) or the workflow_dispatch input.
+#
+# n8n call shape:
+#   POST https://api.github.com/repos/<owner>/<repo>/dispatches
+#   { "event_type": "build-carousel",
+#     "client_payload": { "spec": "assets/carousels/foo_spec.json" } }
+
+on:
+  repository_dispatch:
+    types: [build-carousel]
+  workflow_dispatch:
+    inputs:
+      spec:
+        description: "Repo-relative path to the carousel spec JSON"
+        required: true
+        default: "assets/carousels/claude_writing_prompt_spec.json"
+      to_drive:
+        description: "Upload finished slides to Google Drive"
+        type: boolean
+        default: true
+
+jobs:
+  build-carousel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      GOOGLE_SHEET_ID:      ${{ secrets.GOOGLE_SHEET_ID }}
+      PEXELS_API_KEY:       ${{ secrets.PEXELS_API_KEY }}
+      OPENAI_API_KEY:       ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_IMAGE_MODEL:   gpt-image-1
+      OPENAI_VISION_MODEL:  gpt-4o
+      # Review gate: Gmail SMTP for the review email (same secrets as reels)
+      GMAIL_ADDRESS:        ${{ secrets.GMAIL_ADDRESS }}
+      GMAIL_APP_PASSWORD:   ${{ secrets.GMAIL_APP_PASSWORD }}
+      NOTIFY_TO:            ${{ secrets.NOTIFY_TO }}
+      # spec + to_drive resolved from whichever trigger fired
+      SPEC: ${{ github.event.inputs.spec || github.event.client_payload.spec }}
+      TO_DRIVE: ${{ github.event.inputs.to_drive || github.event.client_payload.to_drive }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write .env
+        run: |
+          printf "GOOGLE_SHEET_ID=%s\n" "$GOOGLE_SHEET_ID" >> .env
+          printf "PEXELS_API_KEY=%s\n"  "$PEXELS_API_KEY"  >> .env
+          printf "OPENAI_API_KEY=%s\n"  "$OPENAI_API_KEY"  >> .env
+          printf "OPENAI_IMAGE_MODEL=%s\n"  "$OPENAI_IMAGE_MODEL"  >> .env
+          printf "OPENAI_VISION_MODEL=%s\n" "$OPENAI_VISION_MODEL" >> .env
+
+      - name: Write Google service account
+        run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > google_service_account.json
+
+      - name: Write Google Drive token (for Drive upload)
+        # Same secret the reels workflow uses — a pre-authorized OAuth token,
+        # because CI has no browser to do an interactive sign-in.
+        if: ${{ env.TO_DRIVE == 'true' }}
+        run: |
+          if [ -n '${{ secrets.GOOGLE_DRIVE_TOKEN_JSON }}' ]; then
+            echo '${{ secrets.GOOGLE_DRIVE_TOKEN_JSON }}' > google_drive_token.json
+          fi
+
+      - name: Build carousel
+        run: |
+          set -o pipefail
+          mkdir -p logs
+          DRIVE_FLAG=""
+          if [ "$TO_DRIVE" = "true" ] && [ -f google_drive_token.json ]; then
+            DRIVE_FLAG="--to-drive"
+          fi
+          echo "Building spec: $SPEC  (drive=$DRIVE_FLAG)"
+          # --update-sheet: Status -> "Ready to Post" (+ Drive URL) on success,
+          # "Render Failed" on error, so the n8n "Building" claim is released.
+          python publisher/carousel_image_pipeline.py --spec "$SPEC" \
+            $DRIVE_FLAG --update-sheet 2>&1 \
+            | tee logs/carousel_build.log
+
+      - name: Upload rendered slides + logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: carousel-${{ github.run_id }}
+          path: |
+            assets/carousels/**/slide_*.png
+            assets/carousels/**/carousel.json
+            logs/
+          retention-days: 14
