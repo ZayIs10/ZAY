@@ -219,6 +219,54 @@ def _mark_failed(reader: SheetsReader, row_index: int, msg: str) -> None:
     _try_update(reader, row_index, "Media Status", msg[:200])
 
 
+def _prefer_sheet_youtube_url(reader: SheetsReader, row_index: int, row: dict,
+                              *, dry_run: bool) -> dict:
+    """If the row has a hand-picked 'YouTube URL', make it the clip to use.
+
+    The user curates a specific YouTube link when creating the topic. That
+    link must always win over auto-search. We copy it into 'Media Video URL'
+    (what the whole build consumes) so the user's pick is never overridden,
+    and — if 'Media Image URL' is blank — seed the poster from the video's
+    own thumbnail so the build has an image without an extra search.
+
+    No-op when 'YouTube URL' is empty or isn't a recognizable YouTube link
+    (so a stray note in that cell can't break the build).
+    """
+    yt = (row.get("YouTube URL") or "").strip()
+    if not yt:
+        return row
+    # Accept a full watch/share URL or a bare 11-char video id; reject prose.
+    m = re.search(r"(?:v=|youtu\.be/|/shorts/)([A-Za-z0-9_-]{11})", yt)
+    if not m and re.fullmatch(r"[A-Za-z0-9_-]{11}", yt):
+        yt = f"https://www.youtube.com/watch?v={yt}"
+        m = re.search(r"v=([A-Za-z0-9_-]{11})", yt)
+    if not m:
+        log.warning("Row %d 'YouTube URL' isn't a YouTube link (%.40r) — "
+                    "ignoring it, will auto-find instead.", row_index, yt)
+        return row
+
+    current = (row.get("Media Video URL") or "").strip()
+    if current == yt:
+        log.info("Row %d already using the sheet's YouTube URL.", row_index)
+        return row
+
+    log.info("Row %d: using hand-picked YouTube URL %s (overrides auto-search).",
+             row_index, yt)
+    row["Media Video URL"] = yt
+    if not (row.get("Media Image URL") or "").strip():
+        thumb = _youtube_thumbnail_url(yt)
+        if thumb:
+            row["Media Image URL"] = thumb
+    if not dry_run:
+        _try_update(reader, row_index, "Media Video URL", yt)
+        if (row.get("Media Image URL") or "").strip():
+            _try_update(reader, row_index, "Media Image URL",
+                        row["Media Image URL"])
+        _try_update(reader, row_index, "Media Source", "sheet:YouTube URL")
+        _try_update(reader, row_index, "Media Status", "found")
+    return row
+
+
 def _ensure_media(reader: SheetsReader, row_index: int, row: dict,
                   *, dry_run: bool) -> dict:
     """If the row is missing a video/image URL, discover them (keyless) and
@@ -381,6 +429,14 @@ def run(row_index: int | None, *, topic: str | None = None, dry_run: bool) -> in
     # "Building", not "Ready to Run", and won't kick off a duplicate render.
     if not dry_run:
         _try_update(reader, row_index, "Status", CLAIM_STATUS)
+
+    # USER'S HAND-PICKED CLIP WINS. If the row's "YouTube URL" column is filled
+    # (the link chosen when the topic was created), use THAT exact video and
+    # skip auto-search entirely — never override the user's pick. It's copied
+    # into "Media Video URL" so every downstream step (skip-check, staging,
+    # the sheet itself) reflects what's actually used. Auto-search below only
+    # runs for rows where YouTube URL was left blank.
+    row = _prefer_sheet_youtube_url(reader, row_index, row, dry_run=dry_run)
 
     # Self-serve media: if the row has a Topic but no Media Video/Image URL,
     # find it here (keyless: yt-dlp + Pexels + brand scrape). This means a row

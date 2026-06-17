@@ -464,6 +464,43 @@ def write_row_media(ws, row_index: int, result: dict) -> str:
 # Per-row driver
 # ---------------------------------------------------------------------------
 
+def _use_sheet_youtube_url(ws, row_index: int, row: dict) -> str:
+    """If the row has a hand-picked 'YouTube URL', write it straight into the
+    media columns and return the status ('found'). Returns '' when the column
+    is empty or isn't a YouTube link, so the caller falls back to auto-search.
+
+    This guarantees the user's curated clip is never overridden by the finder.
+    """
+    yt = (row.get("YouTube URL") or "").strip()
+    if not yt:
+        return ""
+    m = re.search(r"(?:v=|youtu\.be/|/shorts/)([A-Za-z0-9_-]{11})", yt)
+    if not m and re.fullmatch(r"[A-Za-z0-9_-]{11}", yt):
+        yt = f"https://www.youtube.com/watch?v={yt}"
+        m = re.search(r"v=([A-Za-z0-9_-]{11})", yt)
+    if not m:
+        log.warning("row %d 'YouTube URL' isn't a YouTube link — auto-finding",
+                    row_index)
+        return ""
+
+    # Poster image: derive from the video id (maxres thumbnail). The reel build
+    # also falls back to this, but seeding it keeps the sheet self-explanatory.
+    thumb = f"https://i.ytimg.com/vi/{m.group(1)}/maxresdefault.jpg"
+    found_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    headers = ws.row_values(1)
+    updates = [
+        ("Media Video URL",      yt),
+        ("Media Image URL",      thumb),
+        ("Media Source",         "sheet:YouTube URL"),
+        ("Media Backups (JSON)", ""),
+        ("Media Status",         "found"),
+        ("Media Found At",       found_at),
+    ]
+    for col_name, value in updates:
+        ws.update_cell(row_index, _col_index(headers, col_name), value)
+    return "found"
+
+
 def process_row(ws, row_index: int, *, force: bool = False) -> str:
     headers, row = _read_row(ws, row_index)
     topic = (row.get("Topic") or "").strip()
@@ -476,6 +513,16 @@ def process_row(ws, row_index: int, *, force: bool = False) -> str:
         log.info("row %d already has Media Status=found; pass --force to re-run",
                  row_index)
         return "skipped"
+
+    # USER'S HAND-PICKED CLIP WINS. If the row's "YouTube URL" column holds a
+    # link the user chose at topic-creation time, use THAT exact video instead
+    # of searching — the user's pick is never overridden. Auto-search only runs
+    # for rows where YouTube URL was left blank.
+    yt_status = _use_sheet_youtube_url(ws, row_index, row)
+    if yt_status:
+        log.info("row %d -> %s (used hand-picked YouTube URL)",
+                 row_index, yt_status)
+        return yt_status
 
     key_points = row.get("Key Points") or ""
     result = discover_for_topic(topic, key_points)
