@@ -22,6 +22,7 @@ import logging
 import os
 import smtplib
 from email.message import EmailMessage
+from urllib.parse import quote
 
 log = logging.getLogger("notify_email")
 
@@ -64,47 +65,83 @@ def send(subject: str, body: str) -> bool:
         return False
 
 
+# GitHub workflow that publishes (or checks) a single IG container by id.
+_PUBLISH_WORKFLOW = "publish_reel_container.yml"
+
+
+def _dispatch_url(repo: str, container_id: str, mode: str) -> str:
+    """Build a one-click GitHub Actions link that pre-fills the publish form.
+
+    GitHub's Actions UI reads `?container_id=...&mode=...` query params into the
+    matching workflow_dispatch inputs, so the link lands the user on the "Run
+    workflow" panel with everything filled — they just press the green button.
+    The IG token never leaves GitHub Secrets; nothing sensitive is in the email.
+    """
+    base = f"https://github.com/{repo}/actions/workflows/{_PUBLISH_WORKFLOW}"
+    return f"{base}?container_id={quote(container_id)}&mode={mode}"
+
+
 def build_review_email(
     *, topic: str, caption: str, drive_url: str,
     staged_ok: bool = False, stage_detail: str = "",
+    container_id: str = "", repo: str = "",
 ) -> tuple[str, str]:
     """Compose the (subject, body) for a 'reel ready to review' email.
 
     `caption` is the full Post Caption from the sheet — it already includes
     the hashtags, so it's sent verbatim as one copy-paste-ready block.
 
-    `staged_ok` True means the reel was uploaded to Instagram as a staged
-    container (caption already attached) and the user just has to tap Publish
-    in the app. False means staging was skipped/failed and the user should
-    post manually from the Drive link — `stage_detail` says why.
+    `staged_ok` True means the reel is sitting on Instagram as a FINISHED
+    container ready to publish. With `container_id` + `repo` set, the email
+    carries two one-click GitHub links: PUBLISH NOW and CHECK STATUS. False
+    means staging was skipped/failed and the user should post manually from
+    the Drive link — `stage_detail` says why.
     """
-    if staged_ok:
-        subject = f"[GenZ reel SCHEDULED on IG — review in Meta Planner] {topic}"
+    have_links = bool(staged_ok and container_id and repo)
+
+    if have_links:
+        subject = f"[GenZ reel READY — 1-click publish] {topic}"
+    elif staged_ok:
+        subject = f"[GenZ reel staged on IG] {topic}"
     else:
         subject = f"[GenZ reel ready to review] {topic}"
 
     caption_block = caption.strip() or "(no caption in sheet)"
 
-    if staged_ok:
+    if have_links:
+        publish_url = _dispatch_url(repo, container_id, "publish")
+        check_url = _dispatch_url(repo, container_id, "check")
         ig_block = (
-            "INSTAGRAM: SCHEDULED FOR +24 HOURS\n"
+            "INSTAGRAM: READY TO PUBLISH (nothing is live yet)\n"
             "------------------------------------------------------------\n"
-            "The reel is scheduled to auto-publish in 24 hours.\n"
-            "To review it before it goes live:\n"
-            "  1. Go to business.facebook.com/latest/content_scheduler\n"
-            "  2. Find the scheduled post in the Planner calendar.\n"
-            "  3. Tap it to preview the video + caption.\n"
-            "  4. If it looks good — do nothing, it posts automatically.\n"
-            "  5. If you want to cancel — tap the post and click Delete.\n\n"
-            "(If you don't see it in the Planner, use the Drive link below\n"
-            "to post manually — the caption is copy-paste ready.)\n"
+            "The reel is uploaded to Instagram as a finished container and\n"
+            "is waiting for your go-ahead. NOTHING posts until you click.\n\n"
+            "  >> PUBLISH NOW (posts the reel live):\n"
+            f"     {publish_url}\n\n"
+            "  >> CHECK STATUS FIRST (reports any processing error, posts\n"
+            "     nothing):\n"
+            f"     {check_url}\n\n"
+            "  After the page opens, press the green \"Run workflow\" button.\n"
+            "  (You're already signed in to GitHub, so your IG token stays\n"
+            "  locked in GitHub Secrets — it is never in this email.)\n\n"
+            f"  Container id: {container_id}\n"
+            "  NOTE: the container expires ~24 h after render — publish today.\n"
+        )
+    elif staged_ok:
+        # Staged but we couldn't build links (missing repo/container id).
+        ig_block = (
+            "INSTAGRAM: STAGED\n"
+            "------------------------------------------------------------\n"
+            "The reel is staged on Instagram"
+            + (f" (container {container_id})" if container_id else "")
+            + ".\nPublish it from the publish_reel_container GitHub workflow.\n"
         )
     else:
         reason = f" ({stage_detail})" if stage_detail else ""
         ig_block = (
-            "INSTAGRAM: NOT SCHEDULED — POST MANUALLY FROM DRIVE\n"
+            "INSTAGRAM: NOT STAGED — POST MANUALLY FROM DRIVE\n"
             "------------------------------------------------------------\n"
-            f"Auto-scheduling to Instagram didn't run{reason}.\n"
+            f"Staging to Instagram didn't run{reason}.\n"
             "Download the reel from the Drive link above and post it yourself;\n"
             "the caption below is copy-paste ready (includes hashtags).\n"
         )

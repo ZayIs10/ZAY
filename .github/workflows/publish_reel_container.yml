@@ -1,0 +1,74 @@
+name: Publish Reel Container
+
+# One-click publish (or status-check) of a single Instagram media container
+# that the reel build already created and emailed you the id of.
+#
+# The review email contains two links that open this workflow with the form
+# pre-filled (?container_id=...&mode=publish | &mode=check) — you just press
+# the green "Run workflow" button:
+#   * mode=publish  -> checks the container is FINISHED, then publishes it live
+#   * mode=check    -> reports the container's status/errors, publishes nothing
+#
+# The Instagram token stays in GitHub Secrets and is never in the email.
+# Containers expire ~24 h after the reel renders, so publish the same day.
+
+"on":
+  workflow_dispatch:
+    inputs:
+      container_id:
+        description: "Instagram container id (from the review email)"
+        required: true
+        type: string
+      mode:
+        description: "publish = post it live; check = report status only"
+        required: true
+        default: check
+        type: choice
+        options:
+          - check
+          - publish
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
+      INSTAGRAM_IG_USER_ID: ${{ secrets.INSTAGRAM_IG_USER_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        # Only needs requests + python-dotenv to hit the Graph API. Installing
+        # the full requirements file keeps the import in publish_reel.py happy.
+        run: pip install -r requirements.txt
+
+      - name: Verify Instagram secrets are set
+        run: |
+          if [ -z "$INSTAGRAM_ACCESS_TOKEN" ] || [ -z "$INSTAGRAM_IG_USER_ID" ]; then
+            echo "::error::INSTAGRAM_ACCESS_TOKEN / INSTAGRAM_IG_USER_ID secret is missing."
+            exit 1
+          fi
+
+      - name: Publish or check the container
+        env:
+          CONTAINER_ID: ${{ github.event.inputs.container_id }}
+          MODE: ${{ github.event.inputs.mode }}
+        run: |
+          set -o pipefail
+          if [ "$MODE" = "publish" ]; then
+            echo "Publishing container $CONTAINER_ID ..."
+            python publisher/publish_reel.py --container-id "$CONTAINER_ID"
+          else
+            echo "Checking status of container $CONTAINER_ID (nothing will be posted)..."
+            python publisher/publish_reel.py --container-id "$CONTAINER_ID" --check-only
+          fi

@@ -256,6 +256,28 @@ def wait_for_container(container_id: str, access_token: str,
     sys.exit("Timed out waiting for container to finish.")
 
 
+def check_container_status(container_id: str, access_token: str) -> tuple[str, str]:
+    """Return (status_code, detail) for a container WITHOUT waiting/publishing.
+
+    Used by the click-to-publish workflow's "check only" mode and as the
+    pre-flight before publishing: a container can sit in IN_PROGRESS, land on
+    FINISHED (ready to publish), or fail with ERROR/EXPIRED. We surface the raw
+    status plus the human-readable `status` field so the run log explains why.
+    """
+    resp = requests.get(
+        f"{GRAPH_BASE}/{container_id}",
+        params={
+            "fields": "status_code,status",
+            "access_token": access_token,
+        },
+        timeout=30,
+    )
+    if resp.status_code != 200:
+        return "ERROR", f"status lookup failed: {resp.status_code} {resp.text}"
+    data = resp.json()
+    return data.get("status_code", ""), data.get("status", "")
+
+
 def publish_container(ig_user_id: str, access_token: str,
                       container_id: str) -> str:
     print("Publishing the Reel...")
@@ -292,6 +314,14 @@ def main() -> None:
                         help="Override caption text. Default: hardcoded for Reel #1.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Upload to Drive + print URL, but don't post to IG.")
+    parser.add_argument("--container-id", default=None,
+                        help="Act on an EXISTING container (created earlier by "
+                             "the reel build) instead of uploading a new video. "
+                             "Used by the click-to-publish workflow.")
+    parser.add_argument("--check-only", action="store_true",
+                        help="With --container-id: print the container's status "
+                             "(FINISHED / IN_PROGRESS / ERROR) and exit without "
+                             "publishing.")
     args = parser.parse_args()
 
     load_dotenv(REPO_ROOT / ".env")
@@ -299,6 +329,31 @@ def main() -> None:
     ig_user_id = os.getenv("INSTAGRAM_IG_USER_ID")
     if not access_token or not ig_user_id:
         sys.exit("INSTAGRAM_ACCESS_TOKEN and INSTAGRAM_IG_USER_ID must be set in .env")
+
+    # Click-to-publish path: a container already exists (the reel build created
+    # it and emailed its id). Check its status, and unless --check-only, publish.
+    if args.container_id:
+        status_code, detail = check_container_status(args.container_id, access_token)
+        print(f"Container {args.container_id}: status={status_code} ({detail})")
+        if args.check_only:
+            if status_code == "FINISHED":
+                print("\n=== READY ===\nContainer is FINISHED and safe to publish.")
+            elif status_code in ("IN_PROGRESS", "PUBLISHED"):
+                print(f"\n=== {status_code} ===\nNothing to fix; "
+                      "re-check shortly or it's already live.")
+            else:
+                sys.exit(f"\n=== {status_code or 'ERROR'} ===\n{detail}")
+            return
+        if status_code != "FINISHED":
+            sys.exit(f"Refusing to publish — container status is "
+                     f"{status_code or 'ERROR'} ({detail}). Nothing was posted.")
+        media_id = publish_container(ig_user_id, access_token, args.container_id)
+        permalink = fetch_permalink(media_id, access_token)
+        print("\n=== PUBLISHED ===")
+        print(f"Media ID: {media_id}")
+        print(f"Permalink: {permalink}" if permalink
+              else "Permalink lookup failed — check your IG profile manually.")
+        return
 
     caption = args.caption or DEFAULT_CAPTION
 

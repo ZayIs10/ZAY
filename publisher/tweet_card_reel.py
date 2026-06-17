@@ -464,7 +464,7 @@ def _stage_on_instagram(reader, row_index: int, video_url: str, row: dict):
     if result.ok:
         _try_update(reader, row_index, "Instagram Post ID", result.container_id)
         _try_update(reader, row_index, "Instagram Post",
-                    "Staged - tap Publish in IG")
+                    "Ready - 1-click publish from review email")
         log.info("Row %d staged on IG (container=%s).",
                  row_index, result.container_id)
     else:
@@ -487,6 +487,7 @@ def _send_review_email(row: dict, drive_url: str, stage=None) -> None:
 
     staged_ok = bool(stage and getattr(stage, "ok", False))
     stage_detail = getattr(stage, "detail", "") if stage else ""
+    container_id = getattr(stage, "container_id", "") if stage else ""
 
     subject, body = build_review_email(
         topic=(row.get("Topic") or "").strip(),
@@ -494,8 +495,35 @@ def _send_review_email(row: dict, drive_url: str, stage=None) -> None:
         drive_url=drive_url,
         staged_ok=staged_ok,
         stage_detail=stage_detail,
+        container_id=container_id,
+        repo=_github_repo(),
     )
     send(subject, body)
+
+
+def _github_repo() -> str:
+    """Return the 'owner/repo' slug used to build the 1-click publish links.
+
+    In CI, GitHub sets GITHUB_REPOSITORY. Locally it falls back to the origin
+    remote, then to the known repo so the email links are never broken.
+    """
+    env = (os.getenv("GITHUB_REPOSITORY") or "").strip()
+    if env:
+        return env
+    try:
+        import subprocess  # noqa: PLC0415
+        url = subprocess.check_output(
+            ["git", "remote", "get-url", "origin"],
+            text=True, stderr=subprocess.DEVNULL,
+        ).strip()
+        slug = url.rsplit("github.com", 1)[-1].lstrip(":/")
+        if slug.endswith(".git"):
+            slug = slug[:-4]
+        if "/" in slug:
+            return slug
+    except Exception:  # noqa: BLE001 — never fail the email over a repo lookup
+        pass
+    return "ZayIs10/ZAY"
 
 
 # ---------------------------------------------------------------------------
