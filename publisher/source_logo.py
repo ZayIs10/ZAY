@@ -22,27 +22,42 @@ LOGO_DIR = os.path.join(ROOT, "assets", "logos")
 # Company keyword -> primary domain. Free logo CDNs (logo.dev, Clearbit) key on
 # the domain, not the name. Keys MUST stay in sync with BRAND_PEOPLE in
 # carousel_image_pipeline.py so any topic that resolves a brand also gets a logo.
+# IMPORTANT: when the story is about a PRODUCT (Claude, ChatGPT, Gemini...), the
+# slide should carry that PRODUCT'S logo, not its parent company's. @evolving.ai
+# does exactly this — their OpenAI/ChatGPT story shows the ChatGPT mark, not a
+# generic "company" logo. So product keys point at the product's own domain
+# (claude.ai, gemini.google.com) whose favicon IS the product logo, while the
+# company keys (anthropic, google) keep the corporate mark. The product key is
+# matched FIRST (see PRODUCT_FIRST below) so "Anthropic's Claude" → Claude logo.
 BRAND_DOMAINS = {
+    # --- products (their own logo) ---
+    "claude": "claude.ai",
+    "chatgpt": "chatgpt.com",
+    "gpt": "chatgpt.com",
+    "gemini": "gemini.google.com",
+    "copilot": "copilot.microsoft.com",
+    "grok": "grok.com",
+    "llama": "llama.com",
+    "midjourney": "midjourney.com",
+    "perplexity": "perplexity.ai",
+    "mistral": "mistral.ai",
+    # --- companies (corporate mark, used only when no product is named) ---
     "anthropic": "anthropic.com",
-    "claude": "anthropic.com",
     "openai": "openai.com",
-    "chatgpt": "openai.com",
-    "gpt": "openai.com",
     "google": "google.com",
-    "gemini": "google.com",
     "deepmind": "deepmind.google",
     "meta": "meta.com",
-    "llama": "meta.com",
     "xai": "x.ai",
-    "grok": "x.ai",
     "tesla": "tesla.com",
     "nvidia": "nvidia.com",
     "microsoft": "microsoft.com",
-    "copilot": "microsoft.com",
-    "mistral": "mistral.ai",
-    "perplexity": "perplexity.ai",
-    "midjourney": "midjourney.com",
 }
+
+# Products take priority over their parent company when BOTH appear in the text
+# (e.g. "Anthropic says new Claude is risky" → show the Claude logo). _canon
+# scans this list first, in order, before falling back to a plain substring scan.
+PRODUCT_FIRST = ["claude", "chatgpt", "gemini", "copilot", "grok", "llama",
+                 "midjourney", "perplexity", "mistral"]
 
 # Free, no-token logo sources (probed 2026-06-13). Clearbit's free logo API is
 # dead (DNS gone) and logo.dev now 401s without a token. Google's favicon
@@ -64,7 +79,13 @@ def _canon(name: str) -> str | None:
     low = name.strip().lower()
     if low in BRAND_DOMAINS:
         return low
-    # substring match so "Anthropic's Claude" or "the OpenAI model" still resolve
+    # PRODUCT wins over parent company: scan products first so a topic naming
+    # both ("Anthropic's Claude") resolves to the product logo (Claude), not the
+    # corporate one (Anthropic).
+    for key in PRODUCT_FIRST:
+        if key in low:
+            return key
+    # then any remaining brand by substring
     for key in BRAND_DOMAINS:
         if key in low:
             return key
@@ -101,8 +122,20 @@ def logo_path(name: str) -> str | None:
 
 
 def logo_for_brands(brands: list[str] | None, topic: str = "") -> str | None:
-    """Best logo for a slide: try each detected brand in order, then the topic
-    text. Returns a cached path or None."""
+    """Best logo for a slide: PRODUCT logo first (Claude/ChatGPT/...), then the
+    detected company brands, then the topic text. Returns a cached path or None.
+
+    Products win even when the upstream brand list only carries the parent
+    company (topic_keywords returns ['anthropic'] for a Claude story) — we
+    re-scan the full topic+brands text for a product name so the slide shows
+    the Claude starburst, not the Anthropic 'A'. This is the @evolving.ai move:
+    the story's PRODUCT logo, not its corporate logo."""
+    blob = f"{topic} {' '.join(brands or [])}".strip()
+    for prod in PRODUCT_FIRST:
+        if prod in blob.lower():
+            p = logo_path(prod)
+            if p:
+                return p
     for b in (brands or []):
         p = logo_path(b)
         if p:
