@@ -71,6 +71,14 @@ every follow-CTA we write.
 
 ---
 
+## 4b. Canonical handle + display name (LOCKED 2026-06-18)
+
+- **Handle: `@genzcapital`** (lowercase, no underscore). This is the one true
+  handle, used by the live tweet-card reels, the carousels, and every published
+  caption. The old finance-era `@genz_capitalbusiness` was scrubbed from the
+  whole repo on 2026-06-18 — do not reintroduce it.
+- **Display name: `Gen Z Capital`** (the tweet-card name line).
+
 ## 5. The name in practice (how "GenZ Capital" reads on a reel)
 
 - **Persistent logo** (bottom-right, per the reel format spec) = the signature.
