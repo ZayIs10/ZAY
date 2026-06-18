@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <link rel="stylesheet" href="styles.css" />
+    <style>
+      /* Reel-2-only positioning that pairs the post-clip videos with the
+       * mockup chrome so a single GSAP transform can move them together. */
+      .post-clip {
+        position: absolute;
+        top: 310px; left: 0;
+        width: 1080px; height: 1080px;
+        object-fit: cover;
+        filter: brightness(0.95) contrast(1.06) saturate(1.02);
+        transform-origin: 0 0;
+        will-change: transform;
+        z-index: 2;
+      }
+      .ig-card { background: transparent; }
+      .ig-image { background: transparent; }
+    </style>
+  </head>
+  <body>
+    <!-- NOTE: the root composition attribute is intentionally omitted while
+         this draft sits alongside the active reel #3 index.html — the lint
+         rule forbids two root entries. The swap-to-render script copies
+         this file to index.html AND adds the attribute back. -->
+    <div id="root"
+      data-start="0"
+      data-duration="30"
+      data-width="1080"
+      data-height="1920"
+    >
+      <!-- ============================================================ -->
+      <!-- POST-IMAGE VIDEO CLIPS — fill the IG image-area square       -->
+      <!-- (track 0)                                                    -->
+      <!-- Each clip is pre-cut from reels/assets/recording.mp4 — see   -->
+      <!-- the pipeline pitfall about shared sources w/ #t fragments.   -->
+      <!-- ============================================================ -->
+      <video id="vid_hook" class="clip post-clip" muted preload="auto"
+             data-start="0" data-duration="3" data-track-index="0"
+             src="assets/clip_hook.mp4"></video>
+      <video id="vid_problem" class="clip post-clip" muted preload="auto"
+             data-start="3" data-duration="7" data-track-index="0"
+             src="assets/clip_problem.mp4"></video>
+      <video id="vid_insight1" class="clip post-clip" muted preload="auto"
+             data-start="10" data-duration="3.4" data-track-index="0"
+             src="assets/clip_insight_1.mp4"></video>
+      <video id="vid_insight2" class="clip post-clip" muted preload="auto"
+             data-start="13.4" data-duration="3.3" data-track-index="0"
+             src="assets/clip_insight_2.mp4"></video>
+      <video id="vid_insight3" class="clip post-clip" muted preload="auto"
+             data-start="16.7" data-duration="3.3" data-track-index="0"
+             src="assets/clip_insight_3.mp4"></video>
+
+      <!-- ============================================================ -->
+      <!-- IG-MOCKUP CHROME (track 1) — header + action bar + caption   -->
+      <!-- Visible scenes 1–3, fades out before scene 4.                -->
+      <!-- ============================================================ -->
+      <div id="igMockup" class="clip ig-mockup" data-start="0" data-duration="20" data-track-index="1">
+        <div class="ig-card">
+          <!-- Header -->
+          <div class="ig-header">
+            <div class="ig-avatar"><div class="ig-avatar-inner">W</div></div>
+            <div class="ig-handle">
+              <span class="ig-handle-name">wealth</span>
+              <span class="ig-handle-sub">Original audio</span>
+            </div>
+            <div class="ig-menu">···</div>
+          </div>
+
+          <!-- Image area: transparent — the post-clip video shows behind -->
+          <div class="ig-image"><div class="ig-image-vignette"></div></div>
+
+          <!-- Action bar — the row of icons under the post image -->
+          <div class="ig-action-bar">
+            <div id="iconHeart" class="ig-icon">
+              <svg viewBox="0 0 24 24">
+                <path class="stroke" d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+              </svg>
+              <div class="ig-strike" id="iconStrike"></div>
+            </div>
+            <div id="iconComment" class="ig-icon">
+              <svg viewBox="0 0 24 24">
+                <path class="stroke" d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              </svg>
+            </div>
+            <div id="iconShare" class="ig-icon">
+              <svg viewBox="0 0 24 24">
+                <path class="stroke" d="M22 2 11 13"/>
+                <path class="stroke" d="M22 2 15 22 11 13 2 9z"/>
+              </svg>
+            </div>
+            <div class="ig-icon-spacer"></div>
+            <div id="iconBookmark" class="ig-icon">
+              <svg viewBox="0 0 24 24">
+                <path class="stroke" d="M19 21 12 16 5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+              </svg>
+            </div>
+          </div>
+
+          <!-- Likes / sends counter -->
+          <div id="igLikes" class="ig-likes">
+            <span id="igLikesCount">124,591</span> likes &nbsp;·&nbsp;
+            <span class="neon-num"><span id="igShareCount">0</span> sends</span>
+          </div>
+
+          <!-- Caption -->
+          <div class="ig-caption">
+            <b>wealth</b> The richest Gen Z founders run faceless accounts that
+            monetize attention. <span class="muted">… more</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================================ -->
+      <!-- SUBTITLES + RANK LIST (track 2)                              -->
+      <!-- Sit ABOVE the mockup so they stay readable during zooms.     -->
+      <!-- ============================================================ -->
+
+      <!-- Scene 1 (0–3s) -->
+      <div class="clip r2-subtitle" data-start="0" data-duration="3" data-track-index="2">
+        <div class="r2-sub-line setup" id="s1a">INSTAGRAM DOESN&rsquo;T</div>
+        <div class="r2-sub-line punch" id="s1b">COUNT LIKES.</div>
+      </div>
+
+      <!-- Scene 2 (3–10s) -->
+      <div class="clip r2-subtitle" data-start="3" data-duration="7" data-track-index="2">
+        <div class="r2-sub-line setup" id="s2a">EVERY POST IS RANKED ON</div>
+        <div class="r2-sub-line punch" id="s2b">DM SHARES.</div>
+      </div>
+
+      <!-- Scene 3 (10–20s) -->
+      <div class="clip r2-rank-list" data-start="10" data-duration="10" data-track-index="2">
+        <div class="r2-rank-row" id="r1"><span class="num">1.</span><span class="lbl">SHARES</span></div>
+        <div class="r2-rank-row" id="r2"><span class="num">2.</span><span class="lbl">WATCH TIME</span></div>
+        <div class="r2-rank-row" id="r3"><span class="num">3.</span><span class="lbl">SAVES</span></div>
+      </div>
+
+      <!-- Scene 4 — 1% reveal (20–27s) -->
+      <div class="clip r2-proof" data-start="20" data-duration="7" data-track-index="2">
+        <div class="r2-proof-num" id="proofNum">0%</div>
+        <div class="r2-proof-lbl" id="proofLbl">SENDS PER REACH = VIRAL</div>
+        <div class="r2-proof-sub" id="proofSub">THE ALGORITHM PUSHES YOU TO NON-FOLLOWERS</div>
+      </div>
+
+      <!-- Scene 5 — CTA grid (27–30s) -->
+      <div class="clip r2-cta-grid" data-start="27" data-duration="3" data-track-index="2">
+        <img id="g1" src="assets/account_screenshots/profile_wealth.png" alt="" />
+        <img id="g2" src="assets/account_screenshots/profile_technology.png" alt="" />
+        <img id="g3" src="assets/account_screenshots/profile_evolving_ai.png" alt="" />
+        <img id="g4" src="assets/account_screenshots/profile_businessbulls.png" alt="" />
+        <img id="g5" src="assets/account_screenshots/profile_futuretech.png" alt="" />
+        <img id="g6" src="assets/account_screenshots/profile_getintoai.png" alt="" />
+      </div>
+      <div class="clip r2-cta-text" data-start="27" data-duration="3" data-track-index="3">
+        <div class="r2-cta-comment" id="ctaA">COMMENT &lsquo;NEXT&rsquo;</div>
+        <div class="r2-cta-divider" id="ctaDiv"></div>
+        <div class="r2-cta-tag" id="ctaB">FOR THE 4 CONTENT TYPES</div>
+        <div class="r2-cta-follow" id="ctaC">FOLLOW @genzcapital</div>
+      </div>
+
+      <!-- Persistent corner logo (track 4) -->
+      <div class="clip logo-corner-persistent" data-start="0" data-duration="30" data-track-index="4">
+        <span class="corner-divider"></span>
+        <span class="corner-text">GENZ CAPITAL</span>
+      </div>
+
+      <!-- Voiceover (track 5) — onyx TTS, mux'd manually after render -->
+      <audio id="vo"
+             data-start="0"
+             data-duration="30"
+             data-track-index="5"
+             data-volume="1.0"
+             src="assets/audio/reel2_voiceover.mp3"></audio>
+    </div>
+
+    <script src="script_reel2.js"></script>
+    <script>
+      window.__timelines = window.__timelines || {};
+      if (!window.__timelines['main']) {
+        window.__timelines['main'] = (window.gsap || { timeline: () => ({}) }).timeline({ paused: true });
+      }
+    </script>
+  </body>
+</html>

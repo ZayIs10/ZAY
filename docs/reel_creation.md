@@ -114,7 +114,7 @@ Every Reel = exactly 30 seconds = 5 beats.
 
 ### Beat 5: CTA (27–30s)
 - **Visual:** Cut back to cinematic shot. Logo in corner.
-- **Text:** "SAVE THIS." then beneath: "FOLLOW @genz_capitalbusiness"
+- **Text:** "SAVE THIS." then beneath: "FOLLOW @genzcapital"
 - **Voiceover:** "Save this. Follow for more."
 - **Animation:** Neon green divider line animates across screen
 

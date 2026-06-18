@@ -82,7 +82,7 @@ class ReelSpec:
 
     # Beat 5 — CTA (27–30s) — five_beat only — defaults match brand
     cta_save: str = "SAVE THIS."
-    cta_follow: str = "FOLLOW @GENZ_CAPITALBUSINESS"
+    cta_follow: str = "FOLLOW @genzcapital"
 
     # Image paths (relative to reels/index.html, so usually "../assets/images/generated/<file>")
     # five_beat only — Montage Hook uses fixed brand screenshots.
@@ -254,9 +254,9 @@ def build_five_beat_html(spec: ReelSpec) -> str:
             f'src="{spec.music_src}"></audio>'
         )
 
-    # cta_follow defaults to "FOLLOW @GENZ_CAPITALBUSINESS" — split into the
-    # neon @handle (b5b) and the small "FOLLOW FOR MORE" foot (b5c).
-    handle = "@GENZ_CAPITALBUSINESS"
+    # cta_follow defaults to "FOLLOW @genzcapital" — split into the
+    # neon @handle (b5b) and the small foot line (b5c).
+    handle = "@genzcapital"
     if spec.cta_follow and "@" in spec.cta_follow:
         handle = "@" + spec.cta_follow.split("@", 1)[1].strip().split()[0]
 

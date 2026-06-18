@@ -291,7 +291,7 @@ def main() -> int:
     caption = (row.get("Post Caption") or row.get("post_caption") or "").strip()
     if not caption:
         # Fall back to a sane minimum so the post isn't blank
-        caption = topic + "\n\nFollow @genz_capitalbusiness for more."
+        caption = topic + "\n\nFollow @genzcapital for the AI tricks worth your time."
 
     publish_cmd = [
         sys.executable,

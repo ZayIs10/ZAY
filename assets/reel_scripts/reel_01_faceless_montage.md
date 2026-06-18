@@ -132,7 +132,7 @@ ever showed their face."
 - Text overlay (large, centered, two main lines):
   Line 1 white ALL CAPS: "COMMENT 'NEXT'"
   Line 2 NEON GREEN: "FOR THE 4 SECRETS"
-  Line 3 white, smaller, below divider: "FOLLOW @genz_capitalbusiness"
+  Line 3 white, smaller, below divider: "FOLLOW @genzcapital"
 - Voiceover: "Comment 'NEXT' for the four secrets. Follow for the full series."
 - End frame: hold last frame for 0.5 seconds for cover-frame selection.
 

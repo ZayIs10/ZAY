@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;600;800&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="30"
+      data-width="1080"
+      data-height="1920"
+    >
+      <!-- BEAT 1 — HOOK (0–3s) -->
+      <div id="b1" class="clip beat" data-start="0" data-duration="3" data-track-index="0">
+        <video class="bg-video" src="assets/clips/claude-runs-business_b1.mp4" autoplay muted playsinline preload="auto"></video>
+        <div class="vignette dark"></div>
+        <div class="beat-stack">
+          <div id="b1a" class="line-setup">ANTHROPIC JUST</div>
+          <div id="b1b" class="line-punch neon">LAUNCHED CLAUDE</div>
+          <div id="b1c" class="line-sub">FOR SMALL BUSINESS</div>
+        </div>
+      </div>
+
+      <!-- BEAT 2 — PROBLEM (3–10s) -->
+      <div id="b2" class="clip beat" data-start="3" data-duration="7" data-track-index="0">
+        <video class="bg-video" src="assets/clips/claude-runs-business_b2.mp4" autoplay muted playsinline preload="auto"></video>
+        <div class="vignette dark"></div>
+        <div class="beat-stack">
+          <div id="b2a" class="line-setup">5 APPS A MONTH</div>
+          <div id="b2b" class="line-setup">QUICKBOOKS, PAYPAL</div>
+          <div id="b2c" class="line-sub">HUBSPOT, CANVA, DOCUSIGN</div>
+        </div>
+      </div>
+
+      <!-- BEAT 3 — INSIGHT (10–20s) -->
+      <div id="b3" class="clip beat" data-start="10" data-duration="10" data-track-index="0">
+        <video class="bg-video" src="assets/clips/claude-runs-business_b3.mp4" autoplay muted playsinline preload="auto"></video>
+        <div class="vignette dark"></div>
+        <div class="beat-stack">
+          <div id="b3a" class="line-setup">NOW IT'S ONE CHAT</div>
+          <div id="b3b" class="line-punch neon">INVOICES, PAYMENTS, EMAILS</div>
+          <div id="b3c" class="line-sub">CLAUDE ASKS BEFORE SENDING</div>
+        </div>
+      </div>
+
+      <!-- BEAT 4 — PROOF (20–27s) -->
+      <div id="b4" class="clip beat" data-start="20" data-duration="7" data-track-index="0">
+        <div class="black-bg"></div>
+        <div class="proof-final">
+          <div id="b4n" class="proof-big neon">15 + 15</div>
+          <div id="b4l" class="proof-lbl">WORKFLOWS + SKILLS</div>
+          <div id="b4s" class="proof-sub">LIVE SINCE MAY 13, 2026</div>
+        </div>
+      </div>
+
+      <!-- BEAT 5 — CTA (27–30s) -->
+      <div id="b5" class="clip beat" data-start="27" data-duration="3" data-track-index="0">
+        <video class="bg-video" src="assets/clips/claude-runs-business_b4.mp4" autoplay muted playsinline preload="auto"></video>
+        <div class="vignette dark"></div>
+        <div class="cta-final">
+          <div id="b5a" class="cta-top">WOULD YOU TRUST IT?</div>
+          <div id="b5b" class="cta-mid neon">@genzcapital</div>
+          <div id="b5c" class="cta-foot">FOLLOW FOR MORE</div>
+        </div>
+      </div>
+      <audio id="vo" data-start="0" data-duration="30" data-track-index="1" data-volume="1.0" src="assets/audio/claude-runs-business_voiceover.mp3"></audio>
+    </div>
+
+    <script src="script.js"></script>
+    <script>
+      window.__timelines = window.__timelines || {};
+      if (!window.__timelines['main']) {
+        window.__timelines['main'] = (window.gsap || { timeline: () => ({}) }).timeline({ paused: true });
+      }
+    </script>
+  </body>
+</html>

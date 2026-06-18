@@ -123,7 +123,7 @@ plants a cliffhanger pulling viewers into Reel #3.
 - Text overlay:
   Line 1 white ALL CAPS: "COMMENT 'NEXT'"
   Line 2 NEON GREEN, larger: "FOR THE 4 CONTENT TYPES"
-  Line 3 white, smaller, below divider: "FOLLOW @genz_capitalbusiness"
+  Line 3 white, smaller, below divider: "FOLLOW @genzcapital"
 - Voiceover: "Comment 'next' for the four content types they all post. Follow for
   the full system."
 - End frame: hold last frame for 0.5 seconds for cover-frame selection.
