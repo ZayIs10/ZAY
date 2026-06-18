@@ -194,6 +194,16 @@ def _expand_plan(fmt: str) -> list[dict]:
     return out
 
 
+def _repeat_range(fmt: str) -> tuple[int, int]:
+    """The (min, max) count of the format's repeating STEP/TOOL content slide —
+    how far the drafter may flex slide count to fit the content. Formats with no
+    repeating slide (e.g. news_hybrid's fixed beats) report (1, 1)."""
+    for entry in FORMATS[fmt]["slide_plan"]:
+        if "n" in entry:
+            return entry["n"]
+    return (1, 1)
+
+
 def skeleton_spec(topic: str, fmt: str | None = None) -> dict:
     """A fill-in-the-blanks spec with the format's slide mix. Free."""
     fmt = fmt or choose_format(topic)
@@ -287,8 +297,15 @@ _BRAND_VOICE = (
 
 _SCHEMA_RULES = (
     "Output STRICT JSON matching the skeleton you are given: same slide "
-    "order and types; you may add extra STEP/TOOL content slides up to the "
-    "format's max. Replace every TODO. Remove every '_note' key.\n"
+    "order and types. Replace every TODO. Remove every '_note' key.\n"
+    "SLIDE COUNT — DECIDE IT FROM THE CONTENT, do not just keep the skeleton "
+    "count: ONE distinct step / tool / idea per content slide, no more, no "
+    "less. If the topic naturally has 6 steps, output 6 STEP slides; if it "
+    "has 3, output 3 — never pad with filler and never cram two ideas onto "
+    "one slide. Add or remove the repeating STEP/TOOL content slides to match "
+    "(stay within the {n_lo}-{n_hi} the format allows, and the whole deck "
+    "must be <= 8 slides so a caption card keeps it under Instagram's 10). "
+    "Keep the cover, recap and cta exactly once each.\n"
     "- headline: SENTENCE case (verified @evolving.ai style — the renderer "
     "uppercases the cover itself), <= 9 words; neon_word = ONE word that "
     "appears verbatim in that headline (the renderer paints it neon green).\n"
@@ -332,13 +349,18 @@ def draft_spec(topic: str, *, fmt: str | None = None, key_points: str = "",
     skel = skeleton_spec(topic, fmt)
     f = FORMATS[fmt]
 
+    # The repeating STEP/TOOL slide's allowed count range, so the drafter knows
+    # how far it may flex the slide count to fit the content (auto-from-content).
+    n_lo, n_hi = _repeat_range(fmt)
+    schema_rules = _SCHEMA_RULES.format(n_lo=n_lo, n_hi=n_hi)
+
     prompt = (
         f"{_BRAND_VOICE}\n\n"
         f"FORMAT: {f['label']} — {f['goal']}\nFORMAT RULES: {f['rules']}\n\n"
         f"{_FACTS_RULE}\n\nTOPIC: {topic}\n"
         + (f"KEY POINTS: {key_points}\n" if key_points else "")
         + (f"SOURCE:\n{source_text}\n" if source_text else "")
-        + f"\n{_SCHEMA_RULES}\nSKELETON:\n{json.dumps(skel, indent=2)}"
+        + f"\n{schema_rules}\nSKELETON:\n{json.dumps(skel, indent=2)}"
     )
     resp = client.chat.completions.create(
         model=model, temperature=0.7,
