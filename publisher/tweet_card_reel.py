@@ -253,15 +253,11 @@ def _prefer_sheet_youtube_url(reader: SheetsReader, row_index: int, row: dict,
     log.info("Row %d: using hand-picked YouTube URL %s (overrides auto-search).",
              row_index, yt)
     row["Media Video URL"] = yt
-    if not (row.get("Media Image URL") or "").strip():
-        thumb = _youtube_thumbnail_url(yt)
-        if thumb:
-            row["Media Image URL"] = thumb
+    # No Media Image URL written — the build derives the poster from this
+    # video's own thumbnail at render time (see build_reel_for_row), so a
+    # separate still is unnecessary. We only record the hand-picked VIDEO.
     if not dry_run:
         _try_update(reader, row_index, "Media Video URL", yt)
-        if (row.get("Media Image URL") or "").strip():
-            _try_update(reader, row_index, "Media Image URL",
-                        row["Media Image URL"])
         _try_update(reader, row_index, "Media Source", "sheet:YouTube URL")
         _try_update(reader, row_index, "Media Status", "found")
     return row
@@ -284,16 +280,12 @@ def _ensure_media(reader: SheetsReader, row_index: int, row: dict,
         if not dry_run:
             media_finder.write_row_media(reader.ws, row_index, result)
             row = _read_row_by_index(reader, row_index)
-        else:  # dry run: graft winners onto the in-memory row only
+        else:  # dry run: graft the video winner onto the in-memory row only
             v = (result["video"]["winner"] or {}).get("media_url", "")
-            i = (result["image"]["winner"] or {}).get("media_url", "")
             if v:
                 row["Media Video URL"] = v
-            if i:
-                row["Media Image URL"] = i
-        log.info("Media found -> video=%s image=%s",
-                 bool(row.get("Media Video URL", "").strip()),
-                 bool(row.get("Media Image URL", "").strip()))
+        log.info("Media found -> video=%s (poster derived from video thumb)",
+                 bool(row.get("Media Video URL", "").strip()))
     except Exception as exc:  # noqa: BLE001 — finder is best-effort
         log.warning("Auto media-find failed on row %d: %s", row_index, exc)
     return row
@@ -438,12 +430,13 @@ def run(row_index: int | None, *, topic: str | None = None, dry_run: bool) -> in
     # runs for rows where YouTube URL was left blank.
     row = _prefer_sheet_youtube_url(reader, row_index, row, dry_run=dry_run)
 
-    # Self-serve media: if the row has a Topic but no Media Video/Image URL,
-    # find it here (keyless: yt-dlp + Pexels + brand scrape). This means a row
-    # only needs Topic + "Ready to Run" — no dependency on n8n's YouTube-API
-    # search, which is the part that keeps breaking ($env block, Merge config).
-    if not (row.get("Media Video URL", "").strip()
-            and row.get("Media Image URL", "").strip()):
+    # Self-serve media: if the row has a Topic but no Media Video URL, find a
+    # clip here (keyless: yt-dlp + Pexels + brand scrape). This means a row only
+    # needs Topic + "Ready to Run" — no dependency on n8n's YouTube-API search,
+    # which is the part that keeps breaking ($env block, Merge config).
+    # Only the VIDEO matters: the poster is derived from the video thumbnail at
+    # render time, so a missing Media Image URL never triggers a re-search.
+    if not row.get("Media Video URL", "").strip():
         row = _ensure_media(reader, row_index, row, dry_run=dry_run)
 
     # Hard rule: no real video clip -> SKIP the post (don't ship a still,

@@ -44,7 +44,6 @@ if str(REPO_ROOT) not in sys.path:
 from publisher.media_sources import (
     brand_detect,
     brand_official,
-    google_images,
     pexels,
     youtube,
 )
@@ -351,19 +350,17 @@ def discover_for_topic(topic: str, key_points: str) -> dict:
             f"{brand}_official_demo",
             lambda b=brand: brand_official.search_videos(b, demo_query, limit=5),
         ))
-        tasks.append((
-            f"{brand}_official_image",
-            lambda b=brand: brand_official.search_images(b, query, limit=5),
-        ))
+        # NOTE: image search intentionally disabled — the build no longer needs
+        # a Media Image URL. The reel derives its poster from the chosen video's
+        # own thumbnail at render time, so searching for a separate still is
+        # wasted work. We only hunt for the VIDEO now.
 
     tasks.extend([
         ("youtube_video", lambda: youtube.search_videos(query, limit=5)),
         ("youtube_demo", lambda: youtube.search_videos(demo_query, limit=5)),
-        ("ddg_image", lambda: google_images.search_images(query, limit=8)),
         # Pexels = copyright-safe, directly-downloadable mp4 fallback so a
         # row never ends up with only un-downloadable URLs.
         ("pexels_video", lambda: pexels.search_videos(query, limit=5)),
-        ("pexels_image", lambda: pexels.search_images(query, limit=5)),
     ])
 
     all_candidates: list[dict] = []
@@ -423,32 +420,21 @@ def write_row_media(ws, row_index: int, result: dict) -> str:
     string written ('found' | 'partial' | 'failed')."""
     headers = ws.row_values(1)
     v = result["video"]["winner"]
-    i = result["image"]["winner"]
 
     video_url = (v or {}).get("media_url", "")
-    image_url = (i or {}).get("media_url", "")
-    sources: list[str] = []
-    if v:
-        sources.append(v.get("source", ""))
-    if i:
-        sources.append(i.get("source", ""))
-    source_label = " | ".join(s for s in sources if s) or ""
+    source_label = (v or {}).get("source", "") if v else ""
 
-    if v and i:
-        status = "found"
-    elif v or i:
-        status = "partial"
-    else:
-        status = "failed"
+    # Only the VIDEO matters now — image search is disabled and the reel
+    # derives its poster from the video thumbnail at render time. So the row
+    # is 'found' if we have a video, 'failed' if not. We deliberately do NOT
+    # write the 'Media Image URL' column (left untouched).
+    status = "found" if v else "failed"
 
-    backups = _backups_json(
-        result["video"]["backups"], result["image"]["backups"],
-    )
+    backups = _backups_json(result["video"]["backups"], [])
     found_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     updates = [
         ("Media Video URL",      video_url),
-        ("Media Image URL",      image_url),
         ("Media Source",         source_label),
         ("Media Backups (JSON)", backups),
         ("Media Status",         status),
@@ -483,14 +469,13 @@ def _use_sheet_youtube_url(ws, row_index: int, row: dict) -> str:
                     row_index)
         return ""
 
-    # Poster image: derive from the video id (maxres thumbnail). The reel build
-    # also falls back to this, but seeding it keeps the sheet self-explanatory.
-    thumb = f"https://i.ytimg.com/vi/{m.group(1)}/maxresdefault.jpg"
+    # No Media Image URL is written — the reel build derives its poster from
+    # this video's own thumbnail at render time, so a separate still is
+    # unnecessary. We only record the hand-picked VIDEO.
     found_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     headers = ws.row_values(1)
     updates = [
         ("Media Video URL",      yt),
-        ("Media Image URL",      thumb),
         ("Media Source",         "sheet:YouTube URL"),
         ("Media Backups (JSON)", ""),
         ("Media Status",         "found"),
