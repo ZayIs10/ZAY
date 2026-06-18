@@ -1,0 +1,95 @@
+name: Publish Due Reels (8pm SGT)
+
+# REAL scheduling for Instagram reels.
+#
+# The IG Graph API can't truly schedule — sending scheduled_publish_time is
+# silently ignored and the reel posts instantly (verified against a live post
+# 2026-06-18). So GitHub does the scheduling: the reel build renders + uploads
+# to Drive and leaves the row at Status="Ready to Post". This cron runs at the
+# peak Singapore/Malaysia evening window and publishes every queued reel, so
+# they go live at 8pm SGT no matter when they rendered.
+#
+# Schedule: 12:00 UTC daily = 8:00 PM SGT/MYT (UTC+8), every day.
+# (GitHub cron is always UTC and can lag a few minutes under load — that's fine
+#  for a peak-time post.)
+#
+# Also runnable manually from the Actions UI (with an optional dry-run).
+
+"on":
+  schedule:
+    - cron: "0 12 * * *"        # 12:00 UTC = 20:00 SGT, every day
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "true = list due reels but publish nothing"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      limit:
+        description: "Max reels to publish this run (blank = no cap)"
+        required: false
+        type: string
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      GOOGLE_SHEET_REELS_NAME: Reels
+      INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
+      INSTAGRAM_IG_USER_ID: ${{ secrets.INSTAGRAM_IG_USER_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Verify Instagram secrets are set
+        run: |
+          if [ -z "$INSTAGRAM_ACCESS_TOKEN" ] || [ -z "$INSTAGRAM_IG_USER_ID" ]; then
+            echo "::error::INSTAGRAM_ACCESS_TOKEN / INSTAGRAM_IG_USER_ID secret is missing."
+            exit 1
+          fi
+
+      - name: Write .env
+        run: |
+          printf "GOOGLE_SHEET_ID=%s\n" "$GOOGLE_SHEET_ID" >> .env
+          printf "GOOGLE_SHEET_REELS_NAME=%s\n" "$GOOGLE_SHEET_REELS_NAME" >> .env
+
+      - name: Write Google service account
+        run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > google_service_account.json
+
+      - name: Publish all due reels
+        env:
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+          LIMIT: ${{ github.event.inputs.limit }}
+        run: |
+          set -o pipefail
+          mkdir -p logs
+          ARGS=""
+          if [ "$DRY_RUN" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          if [ -n "$LIMIT" ]; then ARGS="$ARGS --limit $LIMIT"; fi
+          echo "Running: python publisher/publish_due_reels.py $ARGS"
+          python publisher/publish_due_reels.py $ARGS 2>&1 \
+            | tee "logs/publish_due_reels.log"
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: publish-due-reels-logs-${{ github.run_id }}
+          path: logs/
+          retention-days: 7

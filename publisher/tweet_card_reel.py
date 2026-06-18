@@ -488,16 +488,18 @@ def run(row_index: int | None, *, topic: str | None = None, dry_run: bool) -> in
     )
     _try_update(reader, row_index, "Status", DONE_STATUS)
 
-    # Stage the reel onto Instagram (upload + process, but DO NOT publish).
-    # The user's rule: "Stage only, I tap Publish." Best-effort — if the IG
-    # token is expired or anything fails, the render + Drive + email still
-    # stand; the email just tells the user to post from Drive instead.
-    stage = _stage_on_instagram(reader, row_index, download_url, row)
+    # DO NOT publish to Instagram here. The IG API can't truly schedule (sending
+    # scheduled_publish_time is silently ignored and the reel posts instantly —
+    # verified against a live post 2026-06-18). Instead the row is left at
+    # Status="Ready to Post" and a daily GitHub cron (publish_due_reels.py /
+    # publish_due_reels.yml) publishes it at 8pm SGT — the peak SG/MY window.
+    # So the build just renders + queues; the cron does the timed publish.
 
-    # Email the user: Drive link + the Post Caption (with hashtags), and
-    # whether the reel is staged on IG ready to tap Publish, or needs manual
-    # posting. Best-effort — a notify failure must never undo a good render.
-    _send_review_email(row, download_url, stage)
+    # Email the user: Drive link + the Post Caption (with hashtags), telling
+    # them the reel is queued to auto-publish at 8pm SGT (with a Drive link to
+    # post sooner if they want). Best-effort — a notify failure must never undo
+    # a good render.
+    _send_review_email(row, download_url, None)
 
     log.info("Done. Row %d -> Status=%s, mp4=%s", row_index, DONE_STATUS, download_url)
     return 0

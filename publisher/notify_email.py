@@ -86,61 +86,34 @@ def build_review_email(
     staged_ok: bool = False, stage_detail: str = "",
     container_id: str = "", repo: str = "",
 ) -> tuple[str, str]:
-    """Compose the (subject, body) for a 'reel ready to review' email.
+    """Compose the (subject, body) for a 'reel rendered + queued' email.
 
     `caption` is the full Post Caption from the sheet — it already includes
     the hashtags, so it's sent verbatim as one copy-paste-ready block.
 
-    `staged_ok` True means the reel was SCHEDULED on Instagram ~24h out and now
-    appears in Meta Business Suite Planner, where the user can preview the video
-    + caption before it auto-publishes. The email leads with the Planner link.
-    With `container_id` + `repo` also set, it adds an optional "publish early"
-    GitHub link. False means scheduling was skipped/failed and the user should
-    post manually from the Drive link — `stage_detail` says why.
+    The reel build no longer publishes to Instagram itself (the IG API can't
+    truly schedule — sending scheduled_publish_time is silently ignored and the
+    post goes out instantly). Instead the row is left at Status="Ready to Post"
+    and a daily GitHub cron publishes it at 8pm SGT — the peak SG/MY window.
+    So this email tells the user the reel is QUEUED for 8pm SGT, with the Drive
+    link to post sooner if they want. (`staged_ok` / `stage_detail` /
+    `container_id` / `repo` are kept for signature compatibility but unused.)
     """
-    if staged_ok:
-        subject = f"[GenZ reel SCHEDULED on IG — preview in Meta Planner] {topic}"
-    else:
-        subject = f"[GenZ reel ready to review] {topic}"
+    subject = f"[GenZ reel queued — auto-posts 8pm SGT] {topic}"
 
     caption_block = caption.strip() or "(no caption in sheet)"
 
-    if staged_ok:
-        # Optional "publish it now instead of waiting 24h" link — same media id,
-        # published early via the GitHub workflow. Only shown if we have a repo.
-        early_line = ""
-        if container_id and repo:
-            publish_url = _dispatch_url(repo, container_id, "publish")
-            early_line = (
-                "\n  Want it live NOW instead of waiting? Open this, then press\n"
-                "  the green \"Run workflow\" button (publishes immediately):\n"
-                f"     {publish_url}\n"
-            )
-        ig_block = (
-            "INSTAGRAM: SCHEDULED — PREVIEW IT IN META PLANNER\n"
-            "------------------------------------------------------------\n"
-            "The reel is scheduled to auto-publish in ~24 hours. You can\n"
-            "PREVIEW the actual video + caption (and cancel/edit timing)\n"
-            "right inside Instagram via Meta Business Suite Planner:\n\n"
-            "  >> Open the Planner:\n"
-            "     https://business.facebook.com/latest/content_scheduler\n\n"
-            "  1. Find this reel in the Planner calendar (next ~24h).\n"
-            "  2. Tap it to watch the video + read the caption.\n"
-            "  3. Looks good -> do nothing, it posts automatically.\n"
-            "  4. Want to stop it -> tap the post and Delete.\n"
-            + early_line +
-            "\n  (If you don't see it in the Planner, use the Drive link above\n"
-            "  to post manually — the caption below is copy-paste ready.)\n"
-        )
-    else:
-        reason = f" ({stage_detail})" if stage_detail else ""
-        ig_block = (
-            "INSTAGRAM: NOT STAGED — POST MANUALLY FROM DRIVE\n"
-            "------------------------------------------------------------\n"
-            f"Staging to Instagram didn't run{reason}.\n"
-            "Download the reel from the Drive link above and post it yourself;\n"
-            "the caption below is copy-paste ready (includes hashtags).\n"
-        )
+    ig_block = (
+        "INSTAGRAM: QUEUED — AUTO-PUBLISHES AT 8PM SGT\n"
+        "------------------------------------------------------------\n"
+        "This reel is queued (Status = 'Ready to Post'). A scheduled job\n"
+        "publishes it automatically at the next 8:00 PM SGT — the peak\n"
+        "Singapore/Malaysia evening window — with the caption below.\n\n"
+        "  * Want it out sooner? Download from the Drive link above and\n"
+        "    post it manually now.\n"
+        "  * Don't want it posted? Open the sheet and change this row's\n"
+        "    Status away from 'Ready to Post' before 8pm SGT.\n"
+    )
 
     body = (
         f"Your reel for \"{topic}\" is rendered and uploaded.\n\n"
