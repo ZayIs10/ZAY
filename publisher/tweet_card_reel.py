@@ -511,17 +511,19 @@ def run(row_index: int | None, *, topic: str | None = None, dry_run: bool) -> in
 
 
 def _stage_on_instagram(reader, row_index: int, video_url: str, row: dict):
-    """Best-effort: stage the reel on IG (no publish) and record the outcome
-    in the sheet. Returns the StageResult (ok=False on any failure)."""
-    from publisher.stage_instagram import stage_reel  # late import
+    """Best-effort: SCHEDULE the reel on IG ~24h out so it appears in Meta
+    Business Suite Planner (where the user can preview video + caption before
+    it goes live), and record the outcome in the sheet. Returns the
+    StageResult (ok=False on any failure)."""
+    from publisher.stage_instagram import schedule_reel_24h  # late import
 
     caption = (row.get("Post Caption") or "").strip()
-    result = stage_reel(video_url, caption)
+    result = schedule_reel_24h(video_url, caption)
     if result.ok:
         _try_update(reader, row_index, "Instagram Post ID", result.container_id)
         _try_update(reader, row_index, "Instagram Post",
-                    "Ready - 1-click publish from review email")
-        log.info("Row %d staged on IG (container=%s).",
+                    "Scheduled - preview in Meta Planner")
+        log.info("Row %d scheduled on IG (media_id=%s).",
                  row_index, result.container_id)
     else:
         _try_update(reader, row_index, "Instagram Post",

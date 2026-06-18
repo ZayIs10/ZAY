@@ -91,50 +91,46 @@ def build_review_email(
     `caption` is the full Post Caption from the sheet — it already includes
     the hashtags, so it's sent verbatim as one copy-paste-ready block.
 
-    `staged_ok` True means the reel is sitting on Instagram as a FINISHED
-    container ready to publish. With `container_id` + `repo` set, the email
-    carries two one-click GitHub links: PUBLISH NOW and CHECK STATUS. False
-    means staging was skipped/failed and the user should post manually from
-    the Drive link — `stage_detail` says why.
+    `staged_ok` True means the reel was SCHEDULED on Instagram ~24h out and now
+    appears in Meta Business Suite Planner, where the user can preview the video
+    + caption before it auto-publishes. The email leads with the Planner link.
+    With `container_id` + `repo` also set, it adds an optional "publish early"
+    GitHub link. False means scheduling was skipped/failed and the user should
+    post manually from the Drive link — `stage_detail` says why.
     """
-    have_links = bool(staged_ok and container_id and repo)
-
-    if have_links:
-        subject = f"[GenZ reel READY — 1-click publish] {topic}"
-    elif staged_ok:
-        subject = f"[GenZ reel staged on IG] {topic}"
+    if staged_ok:
+        subject = f"[GenZ reel SCHEDULED on IG — preview in Meta Planner] {topic}"
     else:
         subject = f"[GenZ reel ready to review] {topic}"
 
     caption_block = caption.strip() or "(no caption in sheet)"
 
-    if have_links:
-        publish_url = _dispatch_url(repo, container_id, "publish")
-        check_url = _dispatch_url(repo, container_id, "check")
+    if staged_ok:
+        # Optional "publish it now instead of waiting 24h" link — same media id,
+        # published early via the GitHub workflow. Only shown if we have a repo.
+        early_line = ""
+        if container_id and repo:
+            publish_url = _dispatch_url(repo, container_id, "publish")
+            early_line = (
+                "\n  Want it live NOW instead of waiting? Open this, then press\n"
+                "  the green \"Run workflow\" button (publishes immediately):\n"
+                f"     {publish_url}\n"
+            )
         ig_block = (
-            "INSTAGRAM: READY TO PUBLISH (nothing is live yet)\n"
+            "INSTAGRAM: SCHEDULED — PREVIEW IT IN META PLANNER\n"
             "------------------------------------------------------------\n"
-            "The reel is uploaded to Instagram as a finished container and\n"
-            "is waiting for your go-ahead. NOTHING posts until you click.\n\n"
-            "  >> PUBLISH NOW (posts the reel live):\n"
-            f"     {publish_url}\n\n"
-            "  >> CHECK STATUS FIRST (reports any processing error, posts\n"
-            "     nothing):\n"
-            f"     {check_url}\n\n"
-            "  After the page opens, press the green \"Run workflow\" button.\n"
-            "  (You're already signed in to GitHub, so your IG token stays\n"
-            "  locked in GitHub Secrets — it is never in this email.)\n\n"
-            f"  Container id: {container_id}\n"
-            "  NOTE: the container expires ~24 h after render — publish today.\n"
-        )
-    elif staged_ok:
-        # Staged but we couldn't build links (missing repo/container id).
-        ig_block = (
-            "INSTAGRAM: STAGED\n"
-            "------------------------------------------------------------\n"
-            "The reel is staged on Instagram"
-            + (f" (container {container_id})" if container_id else "")
-            + ".\nPublish it from the publish_reel_container GitHub workflow.\n"
+            "The reel is scheduled to auto-publish in ~24 hours. You can\n"
+            "PREVIEW the actual video + caption (and cancel/edit timing)\n"
+            "right inside Instagram via Meta Business Suite Planner:\n\n"
+            "  >> Open the Planner:\n"
+            "     https://business.facebook.com/latest/content_scheduler\n\n"
+            "  1. Find this reel in the Planner calendar (next ~24h).\n"
+            "  2. Tap it to watch the video + read the caption.\n"
+            "  3. Looks good -> do nothing, it posts automatically.\n"
+            "  4. Want to stop it -> tap the post and Delete.\n"
+            + early_line +
+            "\n  (If you don't see it in the Planner, use the Drive link above\n"
+            "  to post manually — the caption below is copy-paste ready.)\n"
         )
     else:
         reason = f" ({stage_detail})" if stage_detail else ""
