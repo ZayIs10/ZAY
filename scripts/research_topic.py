@@ -145,7 +145,11 @@ def build_enriched_context(news: list[dict], videos: list[dict]) -> str:
 # ---------------------------------------------------------------------------
 
 GPT_SYSTEM = (
-    "You are a Gen Z Capital scriptwriter for a 30-second 9:16 cinematic Instagram Reel. "
+    "You are a Gen Z Capital scriptwriter for a 30-second 9:16 cinematic Reel "
+    "(posted to both YouTube Shorts and Instagram Reels). "
+    "Brand = 'your unfair AI advantage': we find the AI tricks that actually work "
+    "so the viewer doesn't have to. 'Capital' means leverage, NOT money/finance. "
+    "Every reel must teach something the viewer can DO today. "
     "Brand tone: dark, serious, high-stakes. Bold, direct, no fluff. Neon green energy. "
     "No emojis anywhere. Spoken word style — short, fast, punchy. "
     "Output VALID JSON only — no markdown, no commentary."
@@ -162,7 +166,7 @@ Produce ONE JSON object with EXACTLY these keys:
 
 {{
   "template": "montage_hook" | "five_beat",
-  "post_caption": "<150-200 word IG caption with 12-18 hashtags. End with a short DM-share CTA. No emojis.>",
+  "post_caption": "<150-200 word IG caption. FIRST sentence must contain the core topic keyword (this is the search signal). End with a FOLLOW CTA that names the specific value of following Gen Z Capital (e.g. 'Follow @genzcapital - the AI tricks worth your time, daily'), NOT 'follow for more'. Then 3-5 hashtags MAX on the final line. No emojis.>",
   "headline_line_1": "<≤24 chars, ALL CAPS, white headline part 1>",
   "headline_line_2": "<≤14 chars, ALL CAPS, NEON GREEN — key number or power word>",
   "headline_line_3": "<≤24 chars, ALL CAPS, white consequence>",
@@ -194,13 +198,24 @@ TEMPLATE CHOICE RULES:
 VOICEOVER RULES:
 - Total ~30 seconds. Each line lands ~0.5s AFTER its on-screen text appears.
 - Five lines, in order: hook intro, problem/question, insight, proof/cliffhanger, CTA.
+- The 5th (CTA) line is a FOLLOW or LOOP ask - pick whichever fits:
+  * FOLLOW (default): name the value of following, e.g. "Follow Gen Z Capital -
+    I find these so you don't have to." NEVER bare "follow for more".
+  * LOOP (use when the reel taught ONE copy-paste prompt/trick): send them back
+    to the start, e.g. "Paste it. Watch the start again if you missed it."
+  Do NOT use "comment NEXT" / "DM this" here — for cross-platform (YouTube + IG)
+  the ask is follow or loop. (montage_hook keeps its own comment CTA via cta_comment_word.)
 - Spoken word style. Contractions OK. Numbers spelled out for TTS clarity
   (e.g. "thirty million" not "30M") EXCEPT in headlines/proof_number which appear on screen.
 
 CAPTION RULES:
 - 150-200 words, no emojis.
-- End with a short DM-share CTA like "Send this to someone building wealth."
-- Include 12-18 hashtags on the final line.
+- FIRST sentence contains the core topic keyword (SEO - outranks hashtags now).
+- End with a FOLLOW CTA naming the specific value of following Gen Z Capital
+  (the brand = "your unfair AI advantage; I find the AI tricks that work so you
+  don't have to"). Example: "Follow @genzcapital for the AI tricks worth your
+  time." NEVER bare "follow for more" / "like and subscribe" (IG flags it as bait).
+- 3-5 hashtags MAX on the final line (more than 5 risks an IG spam flag).
 """
 
 
