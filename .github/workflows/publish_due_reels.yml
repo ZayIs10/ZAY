@@ -84,6 +84,15 @@ jobs:
       - name: Write Google service account
         run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > google_service_account.json
 
+      - name: Check Instagram token (read-only, posts nothing)
+        # Validates the INSTAGRAM_ACCESS_TOKEN secret before we try to publish:
+        # is it valid, when does it expire, can it see + publish to the account.
+        # Doesn't fail the job (continue-on-error) — the publish step will still
+        # try, and any real failure triggers the alert email. This just surfaces
+        # an expiring/broken token clearly in the log.
+        continue-on-error: true
+        run: python publisher/check_ig_token.py
+
       - name: Publish all due reels
         env:
           DRY_RUN: ${{ github.event.inputs.dry_run }}
