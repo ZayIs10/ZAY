@@ -121,7 +121,11 @@ hook line that triggers "send this to someone who…"** — that drives sends.
 - Whoosh SFX on cuts — reads amateur in 2026
 - Profile-screenshot reels as primary format — Originality Score penalty
 - Hashtag spam (28+ hashtags) — keep it to 8–15 niche-relevant tags
-- Posting at peak Saturday afternoon — your audience is on weekday evenings ET
+- Posting at the wrong local time — our audience is **Singapore + Malaysia
+  (UTC+8)**; post **8pm SGT** (peak evening window). Reels and carousels go out
+  on **different days** (reels = reach days, carousels = save days), never both
+  the same day. (Supersedes the old "weekday evenings ET" guidance — that was the
+  early US-audience assumption and no longer applies.)
 
 ---
 

@@ -1,5 +1,31 @@
 # Gen Z Capital — Automation Project Context
 
+## RULE 0 — Search ALL files first, and CONSOLIDATE (one topic = one file)
+Before answering a question OR creating any new doc/file, FIRST search the whole
+repo (Glob/Grep over docs/, publisher/, brainstorms/, .github/) AND the memory
+index (MEMORY.md) for an existing answer. A lot of useful info already exists and
+must NOT be re-derived or duplicated.
+- If a file already covers the topic (or a closely related one), EXTEND/COMBINE
+  into THAT file. Do NOT create a near-duplicate or a second file on the same
+  subject. The user explicitly does NOT want many scattered files — it makes
+  searching complicated and ineffective. **One topic = one file.**
+- Only create a brand-new file when nothing existing is related.
+- Before creating any file, proactively ask yourself: "what existing file does
+  this belong in?" and merge there if one exists.
+(Why: repeatedly created duplicate files — e.g. a second @evolving.ai
+carousel-format doc when one already had the answer. User flagged 2026-06-18.)
+
+## RULE 0.5 — ZERO manual work for the user; do it yourself
+Never ask the user to do something by hand that I can do with my tools. Do NOT
+tell the user to manually edit code on GitHub, copy/paste a snippet, run a
+command themselves, or perform setup steps I can perform. If I CAN do it (Edit/
+Write, PowerShell, the gh CLI, the ship-automation-change skill, etc.), I just DO
+it — then report what I did. Asking the user to copy-paste or hand-edit wastes
+their time and is not acceptable. (User flagged 2026-06-18. This strengthens the
+ship-automation-change rule.) Only hand a task to the user when it genuinely
+requires THEM — a credential only they hold, a paid action needing approval, or a
+decision only they can make.
+
 ## Project Goal
 Automated Instagram post pipeline for the **GenZ Capital** brand.
 Pulls topics from Google Sheets → generates captions + images → publishes to Instagram.
