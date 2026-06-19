@@ -433,9 +433,132 @@ def draft_spec(topic: str, *, fmt: str | None = None, key_points: str = "",
 
 
 # ---------------------------------------------------------------------------
+# AUTO-DRAFT FROM THE SHEET — the missing link that completes the pipeline
+# ---------------------------------------------------------------------------
+# Flow (carousel sibling of the reels claim->build loop):
+#   row Status == "Ready to Run"  (user sets this)
+#     -> THIS picks the row, chooses the format (default tutorial = locked
+#        launch format), drafts a spec with draft_spec (PAID GPT text call,
+#        usage-guarded), validates it, writes assets/carousels/<slug>_spec.json
+#     -> prints the spec path so the GitHub workflow dispatches build_carousel
+#        on it -> images -> render -> Drive -> review email -> "Ready to Post".
+#
+# DRY RUN does EVERYTHING except the paid draft: it reads the Sheet, picks the
+# row + format, and writes a FREE skeleton spec instead — so the whole chain is
+# verifiable with zero API spend (the user's "set everything up but don't fire
+# images yet" rule).
+TRIGGER_STATUS = "ready to run"   # matched trimmed + lowercased (reels parity)
+DRAFTING_STATUS = "Drafting"      # claim word: distinct from build's "Building"
+
+
+def _carousel_rows():
+    """(reader, [row dicts]) for the carousel Sheet — reuses the review
+    module's reader so there is ONE Sheet-access path, not two."""
+    from publisher.carousel_review import _carousel_sheet_reader
+    reader = _carousel_sheet_reader()
+    values = reader.ws.get_all_values()
+    if not values:
+        return reader, []
+    headers = values[0]
+    rows = []
+    for i, raw in enumerate(values[1:], start=2):
+        row = {headers[j]: (raw[j] if j < len(raw) else "")
+               for j in range(len(headers))}
+        row["_row_index"] = i
+        rows.append(row)
+    return reader, rows
+
+
+def next_ready_topic() -> dict | None:
+    """Return the first carousel row whose Status == 'Ready to Run', or None.
+    Free (one Sheet read). Picks by Status, addresses by Topic downstream."""
+    _reader, rows = _carousel_rows()
+    for row in rows:
+        if str(row.get("Status", "")).strip().lower() == TRIGGER_STATUS:
+            return row
+    return None
+
+
+def draft_from_sheet(*, dry_run: bool = False,
+                     out_dir: Path | None = None) -> dict:
+    """Find the next 'Ready to Run' carousel row and turn it into a spec file.
+
+    Returns {"topic", "format", "spec_path", "drafted": bool, "problems": [...]}
+    or {"topic": None} when no row is ready.
+
+    dry_run=True  -> FREE skeleton spec (no GPT, no spend) — proves the chain.
+    dry_run=False -> PAID draft_spec (cheap GPT text call, usage-guarded).
+    """
+    row = next_ready_topic()
+    if not row:
+        log.info("No carousel row with Status == 'Ready to Run'.")
+        return {"topic": None}
+
+    topic = str(row.get("Topic", "")).strip()
+    key_points = str(row.get("Key Points", "") or row.get("Key Points / Notes",
+                                                          "")).strip()
+    # Format: honour an explicit "Format" column if present + valid, else the
+    # free classifier (which defaults to tutorial = our locked launch format).
+    col_fmt = str(row.get("Format", "")).strip().lower()
+    fmt = col_fmt if col_fmt in VALID_FORMATS else choose_format(topic,
+                                                                 key_points)
+
+    out_dir = out_dir or SPECS_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    spec_path = out_dir / f"{slugify(topic)[:40]}_spec.json"
+
+    if dry_run:
+        spec = skeleton_spec(topic, fmt)
+        problems = []  # skeleton is intentionally TODO-filled; not validated
+        drafted = False
+        log.info("[dry-run] row %s -> FREE skeleton (%s), no GPT spend.",
+                 row.get("_row_index"), fmt)
+    else:
+        guard = UsageGuard.from_env(str(REPO_ROOT))
+        guard.start_run()
+        spec = draft_spec(topic, fmt=fmt, key_points=key_points, guard=guard)
+        problems = spec.get("_validation", [])
+        drafted = True
+        log.info("Drafted spec for %r (%s); cost $%.4f",
+                 topic, fmt, guard.snapshot().run_usd)
+
+    spec_path.write_text(json.dumps(spec, indent=2, ensure_ascii=False),
+                         encoding="utf-8")
+    log.info("Spec written: %s", spec_path.relative_to(REPO_ROOT))
+    return {
+        "topic": topic, "format": fmt,
+        "spec_path": str(spec_path.relative_to(REPO_ROOT)),
+        "drafted": drafted, "problems": problems,
+    }
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 def main() -> int:
+    # Subcommand: draft the next Ready-to-Run Sheet row into a spec.
+    if len(sys.argv) > 1 and sys.argv[1] == "from-sheet":
+        sub = argparse.ArgumentParser(
+            prog="carousel_templates.py from-sheet",
+            description="Draft the next 'Ready to Run' carousel row into a "
+                        "spec. --dry-run writes a FREE skeleton (no spend).")
+        sub.add_argument("--dry-run", action="store_true",
+                         help="FREE skeleton instead of the paid GPT draft")
+        sub.add_argument("--github-output", action="store_true",
+                         help="also emit spec_path/topic to $GITHUB_OUTPUT "
+                              "for the workflow to consume")
+        a = sub.parse_args(sys.argv[2:])
+        res = draft_from_sheet(dry_run=a.dry_run)
+        print(json.dumps(res, indent=2, ensure_ascii=False))
+        if a.github_output and res.get("spec_path"):
+            gh_out = os.getenv("GITHUB_OUTPUT")
+            if gh_out:
+                with open(gh_out, "a", encoding="utf-8") as fh:
+                    fh.write(f"spec_path={res['spec_path']}\n")
+                    fh.write(f"topic={res.get('topic', '')}\n")
+                    fh.write(f"drafted={str(res.get('drafted')).lower()}\n")
+        return 0
+
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--topic", required=True)
     ap.add_argument("--format", choices=VALID_FORMATS, default=None,

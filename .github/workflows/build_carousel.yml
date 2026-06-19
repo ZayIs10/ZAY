@@ -20,9 +20,15 @@ on:
   workflow_dispatch:
     inputs:
       spec:
-        description: "Repo-relative path to the carousel spec JSON"
-        required: true
-        default: "assets/carousels/claude_writing_prompt_spec.json"
+        description: "Repo-relative path to an EXISTING spec JSON. Leave blank
+          to auto-draft the next 'Ready to Run' Sheet row instead."
+        required: false
+        default: ""
+      from_sheet:
+        description: "Ignore 'spec' and draft the next 'Ready to Run' carousel
+          row into a spec first (Sheet -> draft -> build)."
+        type: boolean
+        default: false
       to_drive:
         description: "Upload finished slides to Google Drive"
         type: boolean
@@ -45,7 +51,12 @@ jobs:
       NOTIFY_TO:            ${{ secrets.NOTIFY_TO }}
       # spec + to_drive resolved from whichever trigger fired
       SPEC: ${{ github.event.inputs.spec || github.event.client_payload.spec }}
+      FROM_SHEET: ${{ github.event.inputs.from_sheet || github.event.client_payload.from_sheet }}
       TO_DRIVE: ${{ github.event.inputs.to_drive || github.event.client_payload.to_drive }}
+      OPENAI_SPEC_MODEL:    gpt-4o-mini
+      OPENAI_RUN_BUDGET_USD:     ${{ secrets.OPENAI_RUN_BUDGET_USD }}
+      OPENAI_DAILY_BUDGET_USD:   ${{ secrets.OPENAI_DAILY_BUDGET_USD }}
+      OPENAI_MONTHLY_BUDGET_USD: ${{ secrets.OPENAI_MONTHLY_BUDGET_USD }}
 
     steps:
       - name: Checkout
@@ -67,6 +78,11 @@ jobs:
           printf "OPENAI_API_KEY=%s\n"  "$OPENAI_API_KEY"  >> .env
           printf "OPENAI_IMAGE_MODEL=%s\n"  "$OPENAI_IMAGE_MODEL"  >> .env
           printf "OPENAI_VISION_MODEL=%s\n" "$OPENAI_VISION_MODEL" >> .env
+          printf "OPENAI_SPEC_MODEL=%s\n"   "$OPENAI_SPEC_MODEL"   >> .env
+          [ -n "$OPENAI_RUN_BUDGET_USD" ]     && printf "OPENAI_RUN_BUDGET_USD=%s\n"     "$OPENAI_RUN_BUDGET_USD"     >> .env
+          [ -n "$OPENAI_DAILY_BUDGET_USD" ]   && printf "OPENAI_DAILY_BUDGET_USD=%s\n"   "$OPENAI_DAILY_BUDGET_USD"   >> .env
+          [ -n "$OPENAI_MONTHLY_BUDGET_USD" ] && printf "OPENAI_MONTHLY_BUDGET_USD=%s\n" "$OPENAI_MONTHLY_BUDGET_USD" >> .env
+          true
 
       - name: Write Google service account
         run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > google_service_account.json
@@ -80,6 +96,23 @@ jobs:
             echo '${{ secrets.GOOGLE_DRIVE_TOKEN_JSON }}' > google_drive_token.json
           fi
 
+      - name: Auto-draft spec from the Sheet (if no spec given)
+        id: draft
+        # Runs only when from_sheet=true OR no spec path was provided. This is
+        # the missing link: 'Ready to Run' row -> draft_spec (cheap GPT text,
+        # usage-guarded) -> assets/carousels/<slug>_spec.json. The build step
+        # then picks up DRAFTED_SPEC. If a spec path WAS given, we skip this.
+        if: ${{ env.FROM_SHEET == 'true' || env.SPEC == '' }}
+        run: |
+          set -o pipefail
+          mkdir -p logs
+          python publisher/carousel_templates.py from-sheet --github-output \
+            2>&1 | tee logs/carousel_draft.log
+          # surface the drafted path to the build step
+          if [ -z "${{ steps.draft.outputs.spec_path }}" ]; then
+            echo "No spec_path emitted (no 'Ready to Run' row?) — see log."
+          fi
+
       - name: Build carousel
         run: |
           set -o pipefail
@@ -87,6 +120,13 @@ jobs:
           DRIVE_FLAG=""
           if [ "$TO_DRIVE" = "true" ] && [ -f google_drive_token.json ]; then
             DRIVE_FLAG="--to-drive"
+          fi
+          # Prefer the spec drafted from the Sheet; else the spec path given.
+          DRAFTED="${{ steps.draft.outputs.spec_path }}"
+          if [ -n "$DRAFTED" ]; then SPEC="$DRAFTED"; fi
+          if [ -z "$SPEC" ]; then
+            echo "No spec to build (no path given and no Ready-to-Run row)."
+            exit 1
           fi
           echo "Building spec: $SPEC  (drive=$DRIVE_FLAG)"
           # --update-sheet: Status -> "Ready to Post" (+ Drive URL) on success,
