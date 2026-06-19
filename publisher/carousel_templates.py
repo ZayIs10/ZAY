@@ -68,26 +68,50 @@ SPECS_DIR = REPO_ROOT / "assets" / "carousels"
 # (within min..max).
 FORMATS: dict[str, dict] = {
     "tutorial": {
+        # LAUNCH FORMAT — locked 2026-06-19. The flagship first carousel type.
+        # Full rationale + decisions: brainstorms/evolving-ai-essentials-to-copy.md
+        # and docs/evolving_ai_carousel_format.md. Copy @evolving.ai's ENGINE
+        # (1 image/slide, product logo every slide, 1 idea/slide, source-cited
+        # facts, swipe-for-more) but FLIP the purpose: they REPORT, we TEACH a
+        # usable skill + build the "unfair AI advantage" mindset.
         "label": "Tutorial / How-to",
         "goal": ("Teach ONE usable AI skill end-to-end. The reader must be "
                  "able to DO the thing after swiping — exact tool, exact "
-                 "clicks, exact prompt text where relevant."),
+                 "clicks, exact prompt text where relevant. The viewer is the "
+                 "protagonist; the AI tool is the weapon we hand them."),
         "slide_plan": [
             {"type": "cover", "kicker": "AI HOW-TO",
-             "note": "Headline = the RESULT the reader gets, not the topic. "
-                     "counter chip = effort/cost (e.g. FREE / 2 MIN)."},
+             "note": "HOOK ON THE VIEWER'S STAKES, never AI spectacle. DEFAULT "
+                     "hook = 'outcome in X steps' (e.g. 'Build an AI app in 4 "
+                     "steps'), so the headline names the RESULT + the step "
+                     "count. Rotation variants when they fit better: 'You're "
+                     "using <tool> wrong' (pattern-interrupt) or 'The <tool> "
+                     "trick nobody's using' (FOMO/unfair-advantage). counter "
+                     "chip = effort/cost (e.g. FREE / 2 MIN / 4 STEPS)."},
             {"type": "content", "kicker": "STEP {n}", "n": (3, 5),
-             "note": "One concrete action per slide. Body says exactly what "
-                     "to open/click/type. If a prompt is part of the step, "
-                     "include the literal prompt text."},
+             "note": "ONE concrete action per slide = one numbered focal "
+                     "point, never two ideas on a slide. Body says exactly "
+                     "what to open/click/type. If a prompt is part of the "
+                     "step, include the literal prompt text. If the step "
+                     "states a fact/stat, add a 'source' tag (see source "
+                     "field)."},
             {"type": "content", "kicker": "PRO TIP",
              "note": "One non-obvious upgrade to the basic steps."},
-            {"type": "recap", "note": "The steps, one line each."},
-            {"type": "cta"},
+            {"type": "recap", "note": "Re-list every step, one line each. This "
+                     "is the SAVE ENGINE — it is why a how-to gets bookmarked. "
+                     "Non-negotiable; never drop it."},
+            {"type": "cta", "note": "Phase-1 CTA: name the SPECIFIC ongoing "
+                     "value of following ('I find one of these every day so "
+                     "you don't have to'). NEVER bare 'follow for more' (IG "
+                     "engagement-bait flag + weak). No link CTA until Phase 2."},
         ],
         "rules": ("Steps must be concrete and reproducible. No vague advice "
                   "('experiment with settings'). Name the actual tool/menu/"
-                  "button. Free options first."),
+                  "button. Free options first. Cover hook = 'outcome in X "
+                  "steps' by default. A content slide that states a fact/stat "
+                  "MUST carry a 'source' tag (where the fact came from); a "
+                  "pure how-to action slide needs no source. v1 images are "
+                  "AI-generated cinematic; one numbered focal point per slide."),
     },
     "listicle": {
         "label": "Tool listicle",
@@ -224,13 +248,20 @@ def skeleton_spec(topic: str, fmt: str | None = None) -> dict:
             else:
                 s["body"] = "TODO"
                 s["ref_query"] = "TODO clean visual search phrase"
+                # OPTIONAL source tag — only on slides that state a fact/stat.
+                # The drafter fills it (e.g. "OpenAI") or drops it for pure
+                # how-to action steps. Rendered small in the slide corner.
+                s["source"] = ""
         elif e["type"] == "recap":
             s["headline"] = "What you just learned"
             s["neon_word"] = "learned"
             s["points"] = ["TODO", "TODO", "TODO"]
         elif e["type"] == "cta":
-            s["headline"] = "Follow For Free"
-            s["pills"] = ["DAILY AI TOOLS & HOW-TOS",
+            # Phase-1 CTA (locked): name the SPECIFIC ongoing value of
+            # following — never bare "follow for more". No link until Phase 2.
+            s["headline"] = "I find these so you don't have to"
+            s["neon_word"] = "you"
+            s["pills"] = ["ONE USABLE AI SKILL A DAY",
                           "FRONTIER AI, EXPLAINED SIMPLY",
                           "NO FLUFF. NO HYPE."]
         if e.get("note"):
@@ -282,6 +313,19 @@ def validate_spec(spec: dict) -> list[str]:
                 problems.append(f"slide {i}: has TODO fields")
         if t == "content" and not s.get("body"):
             problems.append(f"slide {i}: content slide needs a body")
+        # CTA must NOT be bare "follow for more" (IG engagement-bait flag).
+        if t == "cta":
+            hl = (s.get("headline") or "").lower()
+            if re.search(r"follow\s+for\s+more|like\s+and\s+subscribe", hl):
+                problems.append(
+                    f"slide {i}: CTA uses bare 'follow for more'/'like and "
+                    f"subscribe' — name the specific value of following")
+    # Tutorial decks REQUIRE a recap slide — it is the save engine (locked).
+    if spec.get("format") == "tutorial":
+        types = [s.get("type") for s in slides]
+        if "recap" not in types:
+            problems.append("tutorial is missing its recap slide (the save "
+                            "engine — required, never drop it)")
     return problems
 
 
@@ -317,6 +361,11 @@ _SCHEMA_RULES = (
     "replace item 2 with ONE lowercase visual word for the slide.\n"
     "- ref_query (content slides only): a clean 3-6 word VISUAL search "
     "phrase (what a photo of this slide looks like), never marketing copy.\n"
+    "- source (content slides only): if the slide STATES A FACT/STAT/CLAIM, "
+    "set source to where it came from (e.g. 'OpenAI', 'Anthropic', the report "
+    "name) — a credibility tag rendered in the slide corner. For a pure "
+    "how-to ACTION step (open X, click Y, type Z) leave source as \"\" (empty) "
+    "and the renderer shows nothing. Never invent a source.\n"
     "- The cover gets NO ref_query (the pipeline auto-derives person+brand).\n"
     "- caption: hook (1 line), summary (2-3 lines), content (the value, may "
     "use line breaks and • bullets), cta (keep as given), hashtags (6-8, "
