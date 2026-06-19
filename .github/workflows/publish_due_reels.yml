@@ -50,6 +50,11 @@ jobs:
       GOOGLE_SHEET_REELS_NAME: Reels
       INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
       INSTAGRAM_IG_USER_ID: ${{ secrets.INSTAGRAM_IG_USER_ID }}
+      # Failure-alert email (Gmail SMTP, app password). If unset, the alert step
+      # just skips — it never fails the job.
+      GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+      NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
 
     steps:
       - name: Checkout
@@ -100,3 +105,28 @@ jobs:
           name: publish-due-reels-logs-${{ github.run_id }}
           path: logs/
           retention-days: 7
+
+      # If the JOB itself died (GitHub outage, dependency error, cancelled run)
+      # the in-script failure alert never got a chance to run — so email from
+      # here too. Skips silently if Gmail secrets are unset; never fails.
+      - name: Email alert if the run failed
+        if: failure()
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python - <<'PY'
+          import os
+          try:
+              from publisher.notify_email import send
+              url = os.getenv("RUN_URL", "")
+              send(
+                  "[GenZ ALERT] 8pm SGT publish run FAILED",
+                  "The scheduled reel-publish run did not finish successfully.\n\n"
+                  "Your queued reels (Status='Ready to Post') were NOT posted and\n"
+                  "remain queued — they'll go out at the next 8pm SGT run.\n\n"
+                  f"See what happened:\n{url}\n",
+              )
+              print("Failure-alert email sent.")
+          except Exception as exc:
+              print(f"Could not send failure-alert email: {exc}")
+          PY

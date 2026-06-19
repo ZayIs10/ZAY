@@ -196,12 +196,45 @@ def main() -> int:
 
     log.info("%d reel(s) due for publishing.", len(due))
     ok = 0
+    failed: list[str] = []
     for row in due:
         if publish_one(ws, row, ig_user_id, access_token, dry_run=args.dry_run):
             ok += 1
+        else:
+            failed.append((row.get("Topic") or f"row {row['_row_index']}").strip())
     log.info("Done. %d/%d published%s.", ok, len(due),
              " (dry run)" if args.dry_run else "")
+
+    # If any reel failed to publish, email the user so a stranded reel is never
+    # silent. Best-effort — a notify failure must not change the exit behavior.
+    # (Stranded reels stay "Ready to Post"... wait, failures are marked
+    # "Publish Failed", so they won't silently retry — the email is the signal
+    # to look. Dry runs never alert.)
+    if failed and not args.dry_run:
+        _alert_failures(failed, ok, len(due))
+
     return 0
+
+
+def _alert_failures(failed: list[str], ok: int, total: int) -> None:
+    """Email the user that one or more reels failed to publish at 8pm SGT."""
+    try:
+        from publisher.notify_email import send  # late import
+        lines = "\n".join(f"  - {t}" for t in failed)
+        subject = f"[GenZ ALERT] {len(failed)}/{total} reel(s) failed to publish"
+        body = (
+            "The 8pm SGT auto-publish run hit problems.\n\n"
+            f"Published OK: {ok}/{total}\n"
+            f"FAILED: {len(failed)}\n{lines}\n\n"
+            "These rows are now marked Status='Publish Failed' in the sheet — "
+            "they will NOT auto-retry. Open the sheet to see the error in the "
+            "'Instagram Post' column. To retry, set the row's Status back to "
+            "'Ready to Post' and it'll go out at the next 8pm SGT.\n"
+        )
+        send(subject, body)
+        log.info("Failure-alert email sent (%d failed).", len(failed))
+    except Exception as exc:  # noqa: BLE001 — alerting must never crash the run
+        log.warning("Could not send failure-alert email: %s", exc)
 
 
 if __name__ == "__main__":
