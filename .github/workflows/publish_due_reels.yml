@@ -33,6 +33,13 @@ name: Publish Due Reels (8pm SGT)
         required: false
         type: string
 
+# Never let two publish runs race (e.g. a manual dry-run while the cron fires).
+# A second run waits for the first instead of cancelling it — so a queued reel
+# can't get stranded by an auto-cancelled overlap (the 2026-06-18 symptom).
+concurrency:
+  group: publish-due-reels
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
