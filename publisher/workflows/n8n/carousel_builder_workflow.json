@@ -1,0 +1,194 @@
+{
+  "name": "Gen Z AI Tools - Carousel Builder (Workflow C)",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            { "mode": "everyMinute" }
+          ]
+        },
+        "documentId": {
+          "__rl": true,
+          "value": "13AEU80ULx2Lxnq9SWDeSSFN7unfhr-x_mPyi37oz7O4",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Reels",
+          "mode": "name"
+        },
+        "event": "rowUpdate",
+        "options": {
+          "valueRender": "UNFORMATTED_VALUE"
+        }
+      },
+      "id": "node_c1_trigger",
+      "name": "Google Sheets Trigger - Row Updated",
+      "type": "n8n-nodes-base.googleSheetsTrigger",
+      "typeVersion": 1,
+      "position": [220, 300],
+      "notes": "Carousels share the SAME 'Reels' tab as the tweet-card reels (user's choice 2026-06-19). The IF node below separates them by 'Post Type' == 'carousel'. If you ever move carousels to their own tab, change this sheetName AND set the GOOGLE_SHEET_CAROUSELS_NAME env var on the GitHub side to match, so the cloud draft step reads the same tab."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cond_status_ready_to_run",
+              "leftValue": "={{ ($json['Status'] || '').toString().trim().toLowerCase() }}",
+              "rightValue": "ready to run",
+              "operator": { "type": "string", "operation": "equals" }
+            },
+            {
+              "id": "cond_is_carousel",
+              "leftValue": "={{ ($json['Post Type'] || '').toString().trim().toLowerCase() }}",
+              "rightValue": "carousel",
+              "operator": { "type": "string", "operation": "equals" }
+            },
+            {
+              "id": "cond_has_topic",
+              "leftValue": "={{ ($json['Topic'] || '').toString().trim() }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node_c2_gate",
+      "name": "IF - Carousel Ready to Run",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [500, 300],
+      "notes": "Fires only when a row's Status == 'Ready to Run' (trimmed, case-insensitive) AND 'Post Type' == 'carousel' AND it has a Topic. The Post Type gate is what splits carousels from reels on the shared tab. 'Ready to Run' is the single GO signal; it is deliberately different from the terminal 'Ready to Post' so this every-minute trigger can never re-fire a finished carousel into a loop."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "a0", "name": "row_number", "value": "={{ $json.row_number || $json.__row || $itemIndex + 2 }}", "type": "number" },
+            { "id": "a1", "name": "row_index", "value": "={{ $json.row_number || $json.__row || $itemIndex + 2 }}", "type": "string" },
+            { "id": "a2", "name": "topic", "value": "={{ ($json['Topic'] || '').toString().trim() }}", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node_c3_extract",
+      "name": "Set - Extract Row Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [760, 300],
+      "notes": "Carry the sheet row number + Topic for the claim and the failure-email. The cloud build re-reads everything it needs from the sheet itself (it finds the next 'Ready to Run' carousel row by Status + Post Type), so n8n does not need to pass any content."
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "13AEU80ULx2Lxnq9SWDeSSFN7unfhr-x_mPyi37oz7O4",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Reels",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": ["row_number"],
+          "value": {
+            "row_number": "={{ $json.row_number }}",
+            "Status": "Drafting"
+          }
+        },
+        "options": {}
+      },
+      "id": "node_c3b_claim",
+      "name": "Sheets - Claim (Drafting)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1020, 300],
+      "notes": "Loop guard: flip Status off 'Ready to Run' to 'Drafting' the moment we start, so the every-minute trigger can't fire a duplicate while this one runs. The claim word is 'Drafting' (NOT the reels' 'Building') because the carousel cloud job drafts the spec first; the GitHub worker then sets 'Ready to Post' on success or 'Render Failed' on error."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.github.com/repos/{{ $env.GITHUB_REPO }}/dispatches",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Accept", "value": "application/vnd.github+json" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.GITHUB_PAT }}" },
+            { "name": "X-GitHub-Api-Version", "value": "2022-11-28" },
+            { "name": "User-Agent", "value": "n8n-carousel-builder" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"event_type\": \"build-carousel\", \"client_payload\": { \"from_sheet\": \"true\", \"to_drive\": \"true\", \"row_index\": \"{{ $json.row_index }}\" } }",
+        "options": {}
+      },
+      "id": "node_c9_dispatch",
+      "name": "HTTP - Trigger Carousel Build",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1300, 300],
+      "onError": "continueErrorOutput",
+      "notes": "Fire the build-carousel GitHub Action via repository_dispatch. client_payload.from_sheet='true' tells the workflow to AUTO-DRAFT the spec from the next 'Ready to Run' carousel row (draft_spec, cheap GPT text, usage-guarded) and then build it; to_drive='true' uploads the finished deck to Drive and emails the review link. The cloud worker does EVERYTHING else: draft spec -> per slide find real reference -> GPT-4o vision -> house-style prompt -> image -> render deck -> Drive -> review email -> write final Status + Drive URL back to this row. If GITHUB_REPO/GITHUB_PAT use $env and your server blocks $env, paste the literal repo ('owner/repo') and a 'Bearer <PAT>' token directly here instead."
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "88cnl88@gmail.com",
+        "subject": "=Carousel build dispatch failed (row {{ $json.row_index }})",
+        "emailType": "text",
+        "message": "=The GitHub dispatch failed for carousel row {{ $json.row_index }} (topic: {{ $json.topic }}). Check Workflow C execution log. The row is left on 'Drafting' - reset it to 'Ready to Run' to retry.",
+        "options": {}
+      },
+      "id": "node_c10_gmail_fail",
+      "name": "Gmail - Notify Dispatch Failed",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1580, 420],
+      "notes": "Only fires if the GitHub dispatch HTTP call itself errors (bad PAT, repo typo, GitHub down). A normal build that ends in 'Render Failed' is handled by the cloud worker writing that Status back to the row, not by this email."
+    }
+  ],
+  "connections": {
+    "Google Sheets Trigger - Row Updated": {
+      "main": [[{ "node": "IF - Carousel Ready to Run", "type": "main", "index": 0 }]]
+    },
+    "IF - Carousel Ready to Run": {
+      "main": [
+        [{ "node": "Set - Extract Row Fields", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Set - Extract Row Fields": {
+      "main": [[{ "node": "Sheets - Claim (Drafting)", "type": "main", "index": 0 }]]
+    },
+    "Sheets - Claim (Drafting)": {
+      "main": [[{ "node": "HTTP - Trigger Carousel Build", "type": "main", "index": 0 }]]
+    },
+    "HTTP - Trigger Carousel Build": {
+      "main": [
+        [],
+        [{ "node": "Gmail - Notify Dispatch Failed", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "notes": "Workflow C - Carousel Builder (2026-06-19). The carousel sibling of Workflow B (tweet-card reels). Mirrors B exactly: on a 'Ready to Run' row it claims the row and fires a GitHub repository_dispatch; the cloud Action does all the real work. The ONLY differences from B: (1) it gates on 'Post Type' == 'carousel' so it ignores reel rows on the shared Reels tab; (2) the claim Status is 'Drafting' not 'Building'; (3) it dispatches event_type 'build-carousel' with client_payload.from_sheet='true' so the Action auto-drafts the spec before building. The matching reel workflow now also excludes 'Post Type' == 'carousel' so the two never fight over a row."
+  }
+}

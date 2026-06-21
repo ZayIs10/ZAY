@@ -469,13 +469,26 @@ def _carousel_rows():
     return reader, rows
 
 
+def _is_carousel_row(row: dict) -> bool:
+    """Carousels share the Reels tab; a 'Post Type' == 'carousel' marks them
+    (the existing project convention — see batch_generate / post_generator).
+    Rows with no Post Type are treated as carousels ONLY on a dedicated tab;
+    on the shared tab a blank Post Type is ambiguous, so we require the tag."""
+    return str(row.get("Post Type", "")).strip().lower() == "carousel"
+
+
 def next_ready_topic() -> dict | None:
     """Return the first carousel row whose Status == 'Ready to Run', or None.
-    Free (one Sheet read). Picks by Status, addresses by Topic downstream."""
+    Free (one Sheet read). Carousels share the Reels tab, so we ALSO require
+    Post Type == 'carousel' to avoid grabbing a reel row. Picks by Status,
+    addresses by Topic downstream."""
     _reader, rows = _carousel_rows()
     for row in rows:
-        if str(row.get("Status", "")).strip().lower() == TRIGGER_STATUS:
-            return row
+        if str(row.get("Status", "")).strip().lower() != TRIGGER_STATUS:
+            continue
+        if not _is_carousel_row(row):
+            continue  # a reel row on the shared tab — leave it for the reel flow
+        return row
     return None
 
 

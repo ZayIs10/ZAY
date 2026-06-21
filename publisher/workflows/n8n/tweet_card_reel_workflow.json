@@ -50,6 +50,12 @@
               "leftValue": "={{ ($json['Topic'] || '').toString().trim() }}",
               "rightValue": "",
               "operator": { "type": "string", "operation": "notEmpty" }
+            },
+            {
+              "id": "cond_not_carousel",
+              "leftValue": "={{ ($json['Post Type'] || '').toString().trim().toLowerCase() }}",
+              "rightValue": "carousel",
+              "operator": { "type": "string", "operation": "notEquals" }
             }
           ]
         },
@@ -60,7 +66,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [500, 300],
-      "notes": "Only fires when a row's Status == 'Ready to Run' (trimmed, case-insensitive) AND it has a Topic. 'Ready to Run' is the single GO signal; it is deliberately different from the terminal 'Ready to Post' so this every-minute trigger can never re-fire a finished reel into a loop."
+      "notes": "Only fires when a row's Status == 'Ready to Run' (trimmed, case-insensitive) AND it has a Topic AND its 'Post Type' is NOT 'carousel'. The Post Type filter matters because carousels share this same Reels tab; carousel rows are handled by the separate Carousel Builder workflow. 'Ready to Run' is the single GO signal; it is deliberately different from the terminal 'Ready to Post' so this every-minute trigger can never re-fire a finished reel into a loop."
     },
     {
       "parameters": {
