@@ -33,6 +33,13 @@ on:
         description: "Upload finished slides to Google Drive"
         type: boolean
         default: true
+      dry_run:
+        description: "VERIFY ONLY ($0): draft a FREE skeleton + find references
+          + plan the render, but generate NO images. Proves the whole chain
+          end-to-end without spending. Set client_payload.dry_run='true' from
+          n8n to do the same."
+        type: boolean
+        default: false
 
 jobs:
   build-carousel:
@@ -53,6 +60,7 @@ jobs:
       SPEC: ${{ github.event.inputs.spec || github.event.client_payload.spec }}
       FROM_SHEET: ${{ github.event.inputs.from_sheet || github.event.client_payload.from_sheet }}
       TO_DRIVE: ${{ github.event.inputs.to_drive || github.event.client_payload.to_drive }}
+      DRY_RUN: ${{ github.event.inputs.dry_run || github.event.client_payload.dry_run }}
       OPENAI_SPEC_MODEL:    gpt-4o-mini
       OPENAI_RUN_BUDGET_USD:     ${{ secrets.OPENAI_RUN_BUDGET_USD }}
       OPENAI_DAILY_BUDGET_USD:   ${{ secrets.OPENAI_DAILY_BUDGET_USD }}
@@ -106,8 +114,11 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p logs
-          python publisher/carousel_templates.py from-sheet --github-output \
-            2>&1 | tee logs/carousel_draft.log
+          # DRY_RUN: draft a FREE skeleton (no GPT spend) instead of a paid draft.
+          DRAFT_DRY=""
+          if [ "$DRY_RUN" = "true" ]; then DRAFT_DRY="--dry-run"; fi
+          python publisher/carousel_templates.py from-sheet $DRAFT_DRY \
+            --github-output 2>&1 | tee logs/carousel_draft.log
           # surface the drafted path to the build step
           if [ -z "${{ steps.draft.outputs.spec_path }}" ]; then
             echo "No spec_path emitted (no 'Ready to Run' row?) — see log."
@@ -117,16 +128,34 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p logs
-          DRIVE_FLAG=""
-          if [ "$TO_DRIVE" = "true" ] && [ -f google_drive_token.json ]; then
-            DRIVE_FLAG="--to-drive"
-          fi
           # Prefer the spec drafted from the Sheet; else the spec path given.
           DRAFTED="${{ steps.draft.outputs.spec_path }}"
           if [ -n "$DRAFTED" ]; then SPEC="$DRAFTED"; fi
           if [ -z "$SPEC" ]; then
             echo "No spec to build (no path given and no Ready-to-Run row)."
             exit 1
+          fi
+
+          if [ "$DRY_RUN" = "true" ]; then
+            # VERIFY ONLY ($0): walk every slide, find real references, print the
+            # render plan — but generate NO images, no Drive, no Sheet write.
+            echo "DRY RUN — verifying the chain for \$0 on spec: $SPEC"
+            python publisher/carousel_image_pipeline.py --spec "$SPEC" \
+              --dry-run 2>&1 | tee logs/carousel_build.log
+            # The draft step claimed the row to 'Drafting'; release it back to
+            # 'Ready to Run' so a dry verification leaves the Sheet untouched.
+            TOPIC="${{ steps.draft.outputs.topic }}"
+            if [ -n "$TOPIC" ]; then
+              python -c "import sys; from publisher.carousel_review import update_sheet_status; update_sheet_status(sys.argv[1], 'Ready to Run'); print('Dry run: row reset to Ready to Run.')" "$TOPIC" \
+                || echo "(could not reset row status — not fatal)"
+            fi
+            echo "DRY RUN complete — no images generated, no spend."
+            exit 0
+          fi
+
+          DRIVE_FLAG=""
+          if [ "$TO_DRIVE" = "true" ] && [ -f google_drive_token.json ]; then
+            DRIVE_FLAG="--to-drive"
           fi
           echo "Building spec: $SPEC  (drive=$DRIVE_FLAG)"
           # --update-sheet: Status -> "Ready to Post" (+ Drive URL) on success,
