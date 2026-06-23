@@ -66,6 +66,10 @@ def _search_via_api(
         "q": query,
         "key": key,
     }
+    # Bias toward recent uploads for news topics: the API lets us hard-filter
+    # to videos published after a date. We don't filter (relevance still leads),
+    # but we DO request publishedAt below so scoring can reward fresh clips —
+    # the fix for "just released" topics pulling months-old footage.
     if channel_id:
         params["channelId"] = channel_id
 
@@ -104,6 +108,9 @@ def _search_via_api(
                 "video_id": vid,
                 "channel": sn.get("channelTitle"),
                 "channel_id": sn.get("channelId"),
+                # publishedAt is an ISO-8601 string (e.g. 2026-06-20T13:00:00Z);
+                # scoring._recency_signal turns it into a freshness boost.
+                "published_at": sn.get("publishedAt"),
                 "view_count": None,
                 "is_official": bool(channel_id),
                 "via": "api",
@@ -261,6 +268,11 @@ def search_videos(
                 "video_id": video_id,
                 "channel": entry.get("channel") or entry.get("uploader"),
                 "channel_id": entry.get("channel_id"),
+                # yt-dlp gives upload_date as YYYYMMDD (flat search often omits
+                # it; full metadata has it). timestamp is a unix epoch. Either
+                # feeds scoring._recency_signal; absent -> no recency effect.
+                "upload_date": entry.get("upload_date"),
+                "timestamp": entry.get("timestamp"),
                 "view_count": entry.get("view_count"),
                 "is_official": bool(channel_handle),
             },

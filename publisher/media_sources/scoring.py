@@ -6,6 +6,7 @@ Deterministic. No LLM, no ML. Tweak SOURCE_WEIGHTS to change priorities.
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from typing import Iterable
 
 
@@ -213,6 +214,152 @@ def _relevance_signal(candidate: dict, topic: str, context: str = "") -> int:
     return delta
 
 
+# --- Rival-company signal (HARD BLOCK) -------------------------------------
+# THE bug the user hit repeatedly: a topic about ANTHROPIC ("Anthropic just
+# released its most dangerous model") pulled an OPENAI clip showing GPT-4.6,
+# because the OpenAI video's title happened to contain generic words ("danger-
+# ous", "model") and the relevance check only looks at the TITLE, never the
+# channel/company. The fix: if the topic names a specific brand and a clip
+# comes from a DIFFERENT known brand's channel, it is the WRONG COMPANY — block
+# it outright. (User chose "hard-block rivals" over a soft penalty: never show
+# a competitor's footage for a brand story; fall back to neutral Pexels instead.)
+#
+# We identify a clip's company from its channel name/id using the same BRANDS
+# table that detects the topic's brand, so the two are always consistent.
+RIVAL_BLOCK_PENALTY = 100_000  # effectively un-winnable; only used as last resort
+
+
+def _brand_of_channel(candidate: dict) -> str | None:
+    """Best-effort: which known brand owns this clip's channel? Returns the
+    brand key (e.g. 'openai') or None if the channel isn't a recognized brand.
+
+    Matches on channel_id (exact, most reliable) first, then on the channel
+    name containing a brand alias. Defensive: a missing BRANDS table or any
+    error degrades to None (no rival blocking) rather than breaking scoring.
+    """
+    extra = candidate.get("extra") or {}
+    channel_name = str(extra.get("channel") or "").lower()
+    channel_id = str(extra.get("channel_id") or "").strip()
+    if not channel_name and not channel_id:
+        return None
+    try:
+        from publisher.media_sources.brand_detect import BRANDS
+    except Exception:  # noqa: BLE001
+        try:
+            from brand_detect import BRANDS  # flat import
+        except Exception:  # noqa: BLE001
+            return None
+
+    for brand, cfg in BRANDS.items():
+        # 1. Exact official channel id match — unambiguous.
+        if channel_id and channel_id == (cfg.get("youtube_handle_id") or ""):
+            return brand
+        # 2. The official @handle (minus the @) appearing in the channel name.
+        handle = str(cfg.get("youtube_channel") or "").lstrip("@").lower()
+        if handle and handle in channel_name.replace(" ", ""):
+            return brand
+        # 3. A brand alias appearing as a word in the channel name
+        #    ("OpenAI", "Anthropic", "Google DeepMind").
+        for alias in cfg.get("aliases", []):
+            a = alias.lower()
+            if len(a) >= 4 and a in channel_name:
+                return brand
+    return None
+
+
+def _rival_brand_signal(
+    candidate: dict, matched_brands: list[str] | None
+) -> int:
+    """Return a massive negative score when this clip's channel belongs to a
+    KNOWN brand that is NOT the topic's brand — i.e. the wrong company. Returns
+    0 when the topic names no brand, the clip's channel isn't a recognized
+    brand, or the channel matches the topic's brand (correct company).
+
+    Only YouTube clips carry a company identity; Pexels/stock have none, so
+    they're never blocked (they're the intended neutral fallback)."""
+    if not matched_brands:
+        return 0
+    if candidate.get("source") != "youtube" and not str(
+        candidate.get("source") or ""
+    ).endswith("_official"):
+        return 0
+    clip_brand = _brand_of_channel(candidate)
+    if not clip_brand:
+        return 0  # unknown channel — can't prove it's a rival; don't block
+    topic_brands = {b.lower() for b in matched_brands}
+    if clip_brand.lower() in topic_brands:
+        return 0  # same company — correct
+    return -RIVAL_BLOCK_PENALTY  # different known company — WRONG, block it
+
+
+# --- Recency signal --------------------------------------------------------
+# THE other half of the user's bug: "this model has been pushed for months" —
+# a topic about a brand-NEW release ("just released") pulled a months-old clip
+# because nothing rewarded fresh uploads. News footage must be current. We
+# reward recent uploads strongly and lightly penalize stale ones, so the newest
+# on-topic clip wins. Candidates with no known upload date are left neutral
+# (we can't punish what we can't date).
+RECENCY_BONUS_FRESH = 45    # uploaded within FRESH_DAYS — strong push
+RECENCY_BONUS_RECENT = 20   # within RECENT_DAYS — moderate
+RECENCY_PENALTY_STALE = 35  # older than STALE_DAYS — sink old "news" footage
+FRESH_DAYS = 30
+RECENT_DAYS = 120
+STALE_DAYS = 365
+
+
+def _parse_upload_dt(extra: dict) -> datetime | None:
+    """Pull an upload datetime (UTC) from a candidate's extra, trying the
+    several shapes the sources produce: ISO publishedAt (API), YYYYMMDD
+    upload_date (yt-dlp), or a unix timestamp. Returns None if undatable."""
+    # 1. YouTube Data API: ISO-8601 string, e.g. "2026-06-20T13:00:00Z".
+    iso = str(extra.get("published_at") or "").strip()
+    if iso:
+        try:
+            return datetime.fromisoformat(
+                iso.replace("Z", "+00:00")
+            ).astimezone(timezone.utc)
+        except ValueError:
+            pass
+    # 2. yt-dlp upload_date: "YYYYMMDD".
+    ud = str(extra.get("upload_date") or "").strip()
+    if len(ud) == 8 and ud.isdigit():
+        try:
+            return datetime(
+                int(ud[:4]), int(ud[4:6]), int(ud[6:8]), tzinfo=timezone.utc
+            )
+        except ValueError:
+            pass
+    # 3. unix timestamp.
+    ts = extra.get("timestamp")
+    if ts:
+        try:
+            return datetime.fromtimestamp(float(ts), tz=timezone.utc)
+        except (TypeError, ValueError, OSError):
+            pass
+    return None
+
+
+def _recency_signal(candidate: dict, *, now: datetime | None = None) -> int:
+    """Boost recent video uploads, penalize stale ones. 0 for images or
+    undatable candidates. `now` is injectable for testing."""
+    if candidate.get("kind") != "video":
+        return 0
+    dt = _parse_upload_dt(candidate.get("extra") or {})
+    if dt is None:
+        return 0
+    now = now or datetime.now(timezone.utc)
+    age_days = (now - dt).days
+    if age_days < 0:           # clock skew / scheduled future date — treat fresh
+        return RECENCY_BONUS_FRESH
+    if age_days <= FRESH_DAYS:
+        return RECENCY_BONUS_FRESH
+    if age_days <= RECENT_DAYS:
+        return RECENCY_BONUS_RECENT
+    if age_days > STALE_DAYS:
+        return -RECENCY_PENALTY_STALE
+    return 0
+
+
 def score(
     candidate: dict,
     *,
@@ -235,6 +382,13 @@ def score(
     base = 100 if _is_brand_official(src) else SOURCE_WEIGHTS.get(src, 10)
 
     extra = candidate.get("extra") or {}
+
+    # WRONG-COMPANY HARD BLOCK — first, because it overrides everything. If the
+    # topic is about brand X and this clip's channel is a DIFFERENT known brand
+    # (an OpenAI video for an Anthropic topic), sink it so far it can only win
+    # if literally nothing else exists. The single biggest fix for the user's
+    # repeated complaint (wrong company in the video).
+    base += _rival_brand_signal(candidate, matched_brands)
 
     # Topic relevance — applies to BOTH video and image candidates so an
     # off-topic still doesn't win either. This is the primary fix for the
@@ -260,6 +414,9 @@ def score(
             base += 5
         # Prefer product-in-action footage over talking-head clips.
         base += _demo_signal(candidate)
+        # Strongly prefer recent uploads so a "just released" topic never pulls
+        # months-old footage (the user's GPT-4.6-for-a-new-model complaint).
+        base += _recency_signal(candidate)
 
     # google_image hosted on a brand domain
     if src == "google_image" and matched_brands:

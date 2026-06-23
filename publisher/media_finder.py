@@ -213,54 +213,122 @@ def _concept_terms(topic: str, key_points: str) -> str:
 
 
 def _build_query(topic: str, key_points: str) -> str:
-    """Compose the YouTube search query.
+    """Compose the YouTube search query — the way a human would type it.
 
-    The auto-detected keyword (e.g. "Claude Mythos" from
-    "Claude Mythos: The AI That Hacks Like a Pro") LEADS the query so
-    YouTube ranks footage that matches the real subject instead of the
-    clickbait tail. The full topic and a Key Points snippet follow to add
-    context without diluting the lead term.
+    PRINCIPLE (the user's locked rule): "put the keyword into YouTube just like
+    that." We search the LITERAL topic — the real subject + the actual headline
+    words — so YouTube returns clips about the real story. We do NOT paraphrase
+    the topic into generic concept words. (The old code rewrote "Anthropic just
+    released its most dangerous model" into "Anthropic released dangerous AI
+    safety" — a vague query that pulled wrong-company/old footage. The fix is to
+    keep the search literal and let scoring pick the right company + freshest
+    clip via the rival-block + recency signals.)
+
+    Build order:
+      1. The literal subject: the clickbait tail is dropped (it's marketing
+         copy), but everything that names the STORY is kept — the brand, the
+         model/version, and the distinctive headline words ("dangerous model").
+      2. For ABSTRACT stories whose literal words appear in no clip title
+         (e.g. "Worth Almost $1 Trillion"), APPEND a couple of concept words
+         ("valuation funding") to widen the pool — but only as a SUFFIX, never
+         as a replacement for the literal subject.
     """
     topic = topic.strip()
     keyword = extract_keyword(topic)
 
-    # When the keyword came from a colon split, the tail is clickbait copy —
-    # drop it and search the keyword alone. When the keyword IS the whole
-    # title (no clean subject found), search the title as-is.
+    # Start from the literal subject. If a clean subject was extracted from a
+    # "<Subject>: <clickbait>" title, lead with it AND keep the distinctive
+    # words from the tail (so "Claude Opus 4.8: The Most Dangerous Model Yet"
+    # searches "Claude Opus 4.8 Dangerous Model", not just "Claude Opus 4.8").
     if keyword and keyword.lower() != topic.lower():
-        q = keyword
+        tail_bits = _distinctive_topic_bits(topic, skip=keyword)
+        q = _dedup_words(f"{keyword} {tail_bits}") if tail_bits else keyword
+        # The extracted keyword can include leading filler that's capitalized in
+        # a headline ("Anthropic Is Now ..."); strip it so the search stays tight.
+        q = _strip_filler(q)
     else:
-        q = topic
+        # No clean colon-subject: search the whole literal topic, minus filler.
+        q = _literal_topic_query(topic)
 
-    # When the story has a CONCEPT (valuation/lawsuit/...), build a FOCUSED
-    # query: the subject anchor + the most distinctive topic tokens + a couple
-    # of concept terms. A focused "Anthropic trillion valuation" finds the
-    # exact clip ("Anthropic Is Now Worth Almost $1 Trillion"); the old bloated
-    # "Anthropic Is Now Worth Almost $1 Trillion funding valuation billion
-    # investment news <key points>" diluted the search and returned generic
-    # brand clips. Concept queries deliberately SKIP the key-points padding.
+    # Concept terms only WIDEN an abstract query — appended, never replacing the
+    # literal subject. This still helps "$1 Trillion" pull valuation footage,
+    # but a concrete topic keeps its real words leading the search.
     concept = _concept_terms(topic, key_points)
     if concept:
-        anchor = _subject_anchor(topic)            # brand/proper-noun lead
-        topic_bits = _distinctive_topic_bits(topic, skip=anchor)  # "trillion"
-        concept_lead = " ".join(concept.split()[:2])  # 2 concept words
-        # Assemble, dropping duplicate tokens (case-insensitive) so an anchor
-        # that also appears in topic_bits doesn't become "Anthropic Anthropic".
-        seen: set[str] = set()
-        parts: list[str] = []
-        for chunk in (anchor, topic_bits, concept_lead):
-            for w in chunk.split():
-                if w.lower() not in seen:
-                    seen.add(w.lower())
-                    parts.append(w)
-        focused = " ".join(parts).strip()
-        return focused or q
+        concept_lead = " ".join(concept.split()[:2])  # 2 concept words, as hint
+        seen = {w.lower() for w in q.split()}
+        extra = " ".join(w for w in concept_lead.split()
+                         if w.lower() not in seen)
+        return f"{q} {extra}".strip() if extra else q
 
-    # No concept: keep the prior behavior (lead term + a short key-points hint).
+    # No concept: lead term + a short key-points hint (unchanged behavior).
     if key_points and len(q) < 80:
         snippet = key_points.strip().split(".")[0][:80]
         q = f"{q} {snippet}".strip()
     return q
+
+
+# Extra filler that adds nothing to a YouTube search even when capitalized at
+# the start of a headline ("Is Now Worth", "Just Released"). Kept separate from
+# _STOPWORDS so the query builder can drop these regardless of capitalization
+# while _STOPWORDS stays conservative for keyword extraction.
+_QUERY_FILLER = _STOPWORDS | {
+    "just", "its", "it's", "now", "most", "almost", "worth", "is", "was",
+    "has", "have", "will", "can", "new", "with", "from", "by", "into",
+}
+
+
+def _literal_topic_query(topic: str) -> str:
+    """The topic searched the way a person would type it: keep the brand, the
+    model/version, and the distinctive content words; drop pure filler
+    ("just", "its", "the", "now", "is", "almost"). Dedupes and caps length so a
+    long title doesn't dilute the search. Lead query for topics with no clean
+    colon-subject, e.g. "Anthropic just released its most dangerous model" ->
+    "Anthropic released dangerous model"."""
+    kept: list[str] = []
+    seen: set[str] = set()
+    for tok in topic.split():
+        bare = tok.strip(".,!?:").lower()
+        if not bare:
+            continue
+        # Always keep version/number tokens ($1, 4.8) — the strongest signal.
+        is_versionish = any(ch.isdigit() for ch in bare)
+        if bare in _QUERY_FILLER and not is_versionish:
+            continue
+        if bare in seen:                      # no "Anthropic ... Anthropic"
+            continue
+        seen.add(bare)
+        kept.append(tok)
+        if len(kept) >= 8:   # plenty for a search; avoids title-length dilution
+            break
+    return " ".join(kept).strip(":,") or topic
+
+
+def _dedup_words(text: str) -> str:
+    """Drop case-insensitive duplicate words, preserving order. Stops a combined
+    query like 'Claude Opus 4.8' + tail 'Claude 4.8' from becoming
+    'Claude Opus 4.8 Claude 4.8'."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for w in text.split():
+        wl = w.lower()
+        if wl in seen:
+            continue
+        seen.add(wl)
+        out.append(w)
+    return " ".join(out)
+
+
+def _strip_filler(text: str) -> str:
+    """Drop pure filler words ('is', 'now', 'most', 'just') from a query while
+    always keeping version/number tokens. Never returns empty — if everything
+    was filler (shouldn't happen for a real topic), returns the input."""
+    kept = [
+        w for w in text.split()
+        if w.strip(".,!?:").lower() not in _QUERY_FILLER
+        or any(ch.isdigit() for ch in w)
+    ]
+    return " ".join(kept) or text
 
 
 def _subject_anchor(topic: str) -> str:
