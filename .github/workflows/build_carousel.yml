@@ -48,6 +48,9 @@ jobs:
 
     env:
       GOOGLE_SHEET_ID:      ${{ secrets.GOOGLE_SHEET_ID }}
+      # Carousels share the Reels tab. Without this the pipeline defaults to
+      # an old "Sheet1" tab and finds no Ready-to-Run rows (verified 2026-06-24).
+      GOOGLE_SHEET_CAROUSELS_NAME: Reels
       PEXELS_API_KEY:       ${{ secrets.PEXELS_API_KEY }}
       OPENAI_API_KEY:       ${{ secrets.OPENAI_API_KEY }}
       OPENAI_IMAGE_MODEL:   gpt-image-1
@@ -82,6 +85,7 @@ jobs:
       - name: Write .env
         run: |
           printf "GOOGLE_SHEET_ID=%s\n" "$GOOGLE_SHEET_ID" >> .env
+          printf "GOOGLE_SHEET_CAROUSELS_NAME=%s\n" "$GOOGLE_SHEET_CAROUSELS_NAME" >> .env
           printf "PEXELS_API_KEY=%s\n"  "$PEXELS_API_KEY"  >> .env
           printf "OPENAI_API_KEY=%s\n"  "$OPENAI_API_KEY"  >> .env
           printf "OPENAI_IMAGE_MODEL=%s\n"  "$OPENAI_IMAGE_MODEL"  >> .env
