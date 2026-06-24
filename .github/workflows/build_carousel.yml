@@ -121,14 +121,19 @@ jobs:
           # DRY_RUN: draft a FREE skeleton (no GPT spend) instead of a paid draft.
           DRAFT_DRY=""
           if [ "$DRY_RUN" = "true" ]; then DRAFT_DRY="--dry-run"; fi
+          # The drafter prints spec_path/topic to $GITHUB_OUTPUT on success. If
+          # it CRASHES (GPT/budget/Sheet error) set -o pipefail makes this step
+          # fail red — that's correct, a real error should be loud. An EMPTY
+          # queue is NOT a crash: the drafter exits 0 and just emits no
+          # spec_path, which the build step treats as a clean skip (below).
           python publisher/carousel_templates.py from-sheet $DRAFT_DRY \
             --github-output 2>&1 | tee logs/carousel_draft.log
-          # surface the drafted path to the build step
           if [ -z "${{ steps.draft.outputs.spec_path }}" ]; then
-            echo "No spec_path emitted (no 'Ready to Run' row?) — see log."
+            echo "No 'Ready to Run' carousel row right now — nothing to draft."
           fi
 
       - name: Build carousel
+        id: build
         run: |
           set -o pipefail
           mkdir -p logs
@@ -136,7 +141,24 @@ jobs:
           DRAFTED="${{ steps.draft.outputs.spec_path }}"
           if [ -n "$DRAFTED" ]; then SPEC="$DRAFTED"; fi
           if [ -z "$SPEC" ]; then
-            echo "No spec to build (no path given and no Ready-to-Run row)."
+            # Two very different reasons SPEC can be empty — and they must NOT be
+            # treated the same:
+            #   (a) Nobody gave a spec path AND the auto-draft found no
+            #       'Ready to Run' carousel row. The queue is simply empty.
+            #       This is NORMAL (n8n may fire on a row that's actually a reel,
+            #       or the carousel queue is empty) — exit GREEN so it doesn't
+            #       spam a failure alert. (The bug the user kept hitting.)
+            #   (b) A spec path WAS explicitly provided but is now missing — a
+            #       real error worth failing on. We can't reach here in case (b)
+            #       because $SPEC would be non-empty; if a given path doesn't
+            #       exist, the pipeline below raises and fails red on its own.
+            echo "::notice::No carousel queued (no 'Ready to Run' carousel row, no spec path). Nothing to build — exiting cleanly."
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # A spec path was resolved but the file isn't there -> real error.
+          if [ ! -f "$SPEC" ]; then
+            echo "::error::Spec path '$SPEC' was given but the file does not exist."
             exit 1
           fi
 
