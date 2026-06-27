@@ -187,15 +187,25 @@ _NEWS_PAT = re.compile(
 def choose_format(topic: str, key_points: str = "") -> str:
     """Pick the carousel format for a topic. Free, deterministic, no GPT.
 
-    Priority listicle > tutorial > news_hybrid: a numbered-tools topic often
-    also contains 'use'/'make' words, and a how-to phrasing beats a stray
-    news verb. Default = tutorial (the brand's #1 format)."""
+    TUTORIAL IS THE LOCKED DEFAULT (user lock, 2026-06-27): the user wants the
+    teaches-a-skill, "outcome in X steps" tutorial format on EVERY carousel
+    unless a topic EXPLICITLY asks for another format. So tutorial wins for any
+    topic that isn't an unmistakable listicle or pure news:
+      - listicle ONLY when the topic is unmistakably a numbered round-up
+        (e.g. "5 AI tools", "top 7 ...") — _LISTICLE_PAT;
+      - news_hybrid ONLY when the topic is clearly breaking news AND carries no
+        how-to signal at all (so a "how to use X's new feature" stays tutorial);
+      - everything else -> tutorial.
+    To force a format regardless of the topic, pass --format on the CLI or set
+    the Sheet's Format column (draft_from_sheet honours an explicit Format).
+    """
     text = f"{topic} {key_points}"
     if _LISTICLE_PAT.search(text):
         return "listicle"
-    if _TUTORIAL_PAT.search(text):
-        return "tutorial"
-    if _NEWS_PAT.search(text):
+    # Pure breaking-news ONLY when there is no how-to/skill phrasing — a topic
+    # like "How to use Claude's new feature" keeps tutorial even though it has a
+    # news verb. Tutorial is the default for literally everything else.
+    if _NEWS_PAT.search(text) and not _TUTORIAL_PAT.search(text):
         return "news_hybrid"
     return "tutorial"
 
