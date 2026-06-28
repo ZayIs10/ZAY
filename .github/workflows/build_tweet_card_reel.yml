@@ -75,30 +75,31 @@ jobs:
       # tool-cache Python that doesn't exist on a normal PC (it stalled this
       # job for the full 45-min timeout once). The PC already has a working
       # Python (3.13) plus ffmpeg/Deno/node — we just verify and use them.
-      - name: Verify build tools are present (python, ffmpeg, Deno, node)
-        # ffmpeg installed once via winget; Python/Deno/node already present.
-        # We VERIFY rather than install. ffmpeg is the one that can be missing
-        # from PATH right after a winget install until the runner restarts and
-        # picks up the updated user PATH. If a REQUIRED tool is missing we
-        # surface a clear error instead of failing deep in the build.
+      - name: Verify build tools + put winget ffmpeg on PATH
+        # ffmpeg is installed once via winget (a FULL build that supports -crf).
+        # The runner service caches PATH from before that install, so ffmpeg may
+        # not be on PATH yet — we FIND the winget binary and add its bin dir to
+        # GITHUB_PATH so every later step (and shutil.which in the code) sees the
+        # good ffmpeg, NOT the stripped CapCut/bundled builds that reject -crf.
         run: |
-          $missing = @()
-          foreach ($tool in 'python','ffmpeg','deno','node') {
-            $cmd = Get-Command $tool -ErrorAction SilentlyContinue
-            if ($cmd) {
-              Write-Host "OK  $tool -> $($cmd.Source)"
-            } else {
-              Write-Host "::warning::$tool not found on PATH"
-              # python + ffmpeg are hard requirements; deno/node are usually
-              # already there and yt-dlp can fall back without the JS solver.
-              if ($tool -in @('python','ffmpeg')) { $missing += $tool }
-            }
-          }
-          if ($missing.Count -gt 0) {
-            Write-Host "::error::Required tool(s) missing from PATH: $($missing -join ', '). Restart the runner ('GitHubActionsRunner-GenZ' scheduled task) so it picks up the current user PATH."
-            exit 1
-          }
           python --version
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+            $ff = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Recurse -Filter ffmpeg.exe -ErrorAction SilentlyContinue |
+                  Where-Object { $_.FullName -match 'Gyan\.FFmpeg' } | Select-Object -First 1
+            if ($ff) {
+              $bin = Split-Path $ff.FullName
+              Add-Content -Path $env:GITHUB_PATH -Value $bin
+              Write-Host "Added winget ffmpeg to PATH: $bin"
+            } else {
+              Write-Host "::warning::winget ffmpeg not found; the code's resolver will still locate it via its known install path."
+            }
+          } else {
+            Write-Host "ffmpeg already on PATH: $((Get-Command ffmpeg).Source)"
+          }
+          foreach ($tool in 'deno','node') {
+            $c = Get-Command $tool -ErrorAction SilentlyContinue
+            if ($c) { Write-Host "OK  $tool -> $($c.Source)" } else { Write-Host "::warning::$tool not on PATH (yt-dlp can still run; JS solver may degrade)" }
+          }
 
       - name: Install Python dependencies (persistent venv)
         # Use a venv that lives OUTSIDE the repo so `actions/checkout` clean

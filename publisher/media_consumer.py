@@ -51,17 +51,41 @@ def _youtube_cookiefile() -> str | None:
 
 
 def _resolve_ffmpeg() -> str:
-    bundled = REPO_ROOT / "node_modules" / "@ffmpeg-installer" / "win32-x64" / "ffmpeg.exe"
-    if bundled.exists():
-        return str(bundled)
+    """Locate a usable ffmpeg, preferring a REAL one on PATH.
+
+    Order matters: a modern ffmpeg on PATH (e.g. the winget Gyan build on the
+    self-hosted runner, or apt's ffmpeg in CI) wins FIRST. The node bundled
+    binary is an ancient 2018 build that rejects modern flags like `-crf` in
+    our composite command ("Unrecognized option 'crf'"), and CapCut ships a
+    stripped build — both are last-resort fallbacks only used when nothing
+    real is installed. (Previously bundled was tried first, which silently
+    routed every render through that broken 2018 ffmpeg.)
+    """
+    on_path = shutil.which("ffmpeg")
+    if on_path:
+        return on_path
+    # A full ffmpeg installed via winget (the self-hosted runner) lives under
+    # WinGet\Packages even when it isn't on a non-interactive process's PATH
+    # (the runner service caches PATH from before winget ran). Prefer it over
+    # the stripped CapCut/bundled builds, which reject `-crf` etc.
+    winget_pkgs = Path.home() / "AppData" / "Local" / "Microsoft" / "WinGet" / "Packages"
+    if winget_pkgs.exists():
+        for ff in sorted(winget_pkgs.glob("Gyan.FFmpeg*/**/bin/ffmpeg.exe"), reverse=True):
+            return str(ff)
     capcut_root = Path.home() / "AppData" / "Local" / "CapCut" / "Apps"
     if capcut_root.exists():
         for ff in capcut_root.glob("*/ffmpeg.exe"):
             return str(ff)
+    bundled = REPO_ROOT / "node_modules" / "@ffmpeg-installer" / "win32-x64" / "ffmpeg.exe"
+    if bundled.exists():
+        return str(bundled)
     return "ffmpeg"
 
 
 def _resolve_ffprobe() -> str:
+    on_path = shutil.which("ffprobe")
+    if on_path:
+        return on_path
     ff = _resolve_ffmpeg()
     if ff.lower().endswith("ffmpeg.exe"):
         probe = Path(ff).with_name("ffprobe.exe")
