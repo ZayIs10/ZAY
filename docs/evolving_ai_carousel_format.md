@@ -38,6 +38,26 @@ default for every carousel**, in code AND in how the assistant builds one:
 
 This block is the contract. The slide-by-slide detail below is how to satisfy it.
 
+### Delivery rule — REVIEW ONLY, never auto-post to Instagram (user lock 2026-06-27)
+
+Every carousel the assistant builds STOPS at review. The pipeline's last step is
+the review gate (`carousel_review.review_gate`), which does exactly three things
+and nothing more:
+
+1. **Render** the slide PNGs.
+2. **Upload the deck folder to Google Drive** and return ONE shareable folder
+   link (every slide + `caption.txt` inside).
+3. **Email** the user that Drive link + the copy-paste-ready caption, and mark
+   the Sheet row **"Ready to Post."**
+
+It does **NOT** post to Instagram, does NOT create an IG draft/container, and
+makes NO Graph-API call — there is intentionally no publish code in the carousel
+path. Instagram only ever happens later, manually, when the USER flips the row to
+**"Approved to Post."** When a build runs locally (where the Gmail app password
+isn't available), fire `.github/workflows/send_carousel_review.yml` to send the
+same review email from the cloud. Drive auth = the user's OAuth token
+(`google_drive_token.json`); never the service account (no storage quota).
+
 ---
 
 ## 1. The fixed canvas (non-negotiable)
