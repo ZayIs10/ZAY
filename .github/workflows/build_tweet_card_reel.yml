@@ -70,39 +70,54 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Verify build tools are present (ffmpeg, Deno, node)
-        # On the self-hosted PC these are installed once (ffmpeg via winget,
-        # Deno + node already present). We VERIFY rather than install. ffmpeg
-        # is the one that can be missing from PATH right after a winget install
-        # until the shell restarts — the runner service picks up the user PATH
-        # on its next start, so this should pass. If ffmpeg is genuinely
-        # missing we surface a clear error instead of failing deep in the build.
+      # NOTE: we deliberately do NOT use actions/setup-python here. On a
+      # self-hosted Windows runner that action hangs trying to provision a
+      # tool-cache Python that doesn't exist on a normal PC (it stalled this
+      # job for the full 45-min timeout once). The PC already has a working
+      # Python (3.13) plus ffmpeg/Deno/node — we just verify and use them.
+      - name: Verify build tools are present (python, ffmpeg, Deno, node)
+        # ffmpeg installed once via winget; Python/Deno/node already present.
+        # We VERIFY rather than install. ffmpeg is the one that can be missing
+        # from PATH right after a winget install until the runner restarts and
+        # picks up the updated user PATH. If a REQUIRED tool is missing we
+        # surface a clear error instead of failing deep in the build.
         run: |
-          $ok = $true
-          foreach ($tool in 'ffmpeg','deno','node') {
+          $missing = @()
+          foreach ($tool in 'python','ffmpeg','deno','node') {
             $cmd = Get-Command $tool -ErrorAction SilentlyContinue
             if ($cmd) {
               Write-Host "OK  $tool -> $($cmd.Source)"
             } else {
               Write-Host "::warning::$tool not found on PATH"
-              if ($tool -eq 'ffmpeg') { $ok = $false }
+              # python + ffmpeg are hard requirements; deno/node are usually
+              # already there and yt-dlp can fall back without the JS solver.
+              if ($tool -in @('python','ffmpeg')) { $missing += $tool }
             }
           }
-          if (-not $ok) {
-            Write-Host "::error::ffmpeg is required for muxing but was not found on PATH. Restart the runner so it picks up the updated PATH (winget added ffmpeg)."
+          if ($missing.Count -gt 0) {
+            Write-Host "::error::Required tool(s) missing from PATH: $($missing -join ', '). Restart the runner ('GitHubActionsRunner-GenZ' scheduled task) so it picks up the current user PATH."
             exit 1
           }
+          python --version
 
-      - name: Install Python dependencies
+      - name: Install Python dependencies (persistent venv)
+        # Use a venv that lives OUTSIDE the repo so `actions/checkout` clean
+        # never deletes it — installs are slow the first run, then near-instant
+        # on every later run (the self-hosted PC reuses it). Keeps the build's
+        # deps out of the user's global site-packages too.
+        id: venv
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install yt-dlp
+          $venv = "C:\actions-runner\genz-venv"
+          if (-not (Test-Path "$venv\Scripts\python.exe")) {
+            Write-Host "Creating venv at $venv ..."
+            python -m venv $venv
+          }
+          $py = "$venv\Scripts\python.exe"
+          & $py -m pip install --upgrade pip
+          & $py -m pip install -r requirements.txt
+          & $py -m pip install yt-dlp
+          "python=$py" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Using venv python: $py"
 
       - name: Write .env
         # OVERWRITE (not append): a self-hosted runner reuses the same working
@@ -180,13 +195,14 @@ jobs:
           TOPIC: ${{ steps.target.outputs.topic }}
           ROW: ${{ steps.target.outputs.row }}
           MODE: ${{ steps.target.outputs.mode }}
+          PY: ${{ steps.venv.outputs.python }}
         run: |
           New-Item -ItemType Directory -Force -Path logs, renders | Out-Null
           $ErrorActionPreference = 'Continue'
           if ($env:MODE -eq 'topic') {
-            python publisher/tweet_card_reel.py --topic "$env:TOPIC" 2>&1 | Tee-Object -FilePath "logs/tweet_card_reel.log"
+            & $env:PY publisher/tweet_card_reel.py --topic "$env:TOPIC" 2>&1 | Tee-Object -FilePath "logs/tweet_card_reel.log"
           } else {
-            python publisher/tweet_card_reel.py --row "$env:ROW" 2>&1 | Tee-Object -FilePath "logs/tweet_card_reel_row$($env:ROW).log"
+            & $env:PY publisher/tweet_card_reel.py --row "$env:ROW" 2>&1 | Tee-Object -FilePath "logs/tweet_card_reel_row$($env:ROW).log"
           }
           # Propagate the Python exit code so a real build failure fails the step.
           if ($LASTEXITCODE -ne 0) {
