@@ -91,19 +91,21 @@ jobs:
         # then copy the contents of google_drive_token.json into this secret).
         run: echo '${{ secrets.GOOGLE_DRIVE_TOKEN_JSON }}' > google_drive_token.json
 
-      - name: Write YouTube cookies
-        # Netscape-format cookies so yt-dlp can fetch YouTube from GitHub's
-        # datacenter IP (otherwise: "Sign in to confirm you're not a bot").
-        # Export once with a browser extension, paste into the YOUTUBE_COOKIES
-        # secret. Skips silently if the secret is unset.
+      - name: Write YouTube cookies (OPTIONAL — cookieless is the default)
+        # Downloads now use multiple cookieless YouTube player clients
+        # (tv/ios/android/web_safari) and try each until one works, so login
+        # cookies are NO LONGER REQUIRED — that's what kept breaking (the
+        # YOUTUBE_COOKIES secret rots every week and silently skipped rows).
+        # If the secret IS present we still write it as a bonus for the rare
+        # age-gated clip; if it's empty that's totally normal — NOT a warning.
         env:
           YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
         run: |
           if [ -n "$YOUTUBE_COOKIES" ]; then
             printf '%s\n' "$YOUTUBE_COOKIES" > youtube_cookies.txt
-            echo "Wrote youtube_cookies.txt ($(wc -l < youtube_cookies.txt) lines)"
+            echo "Wrote youtube_cookies.txt ($(wc -l < youtube_cookies.txt) lines) — used as a bonus backup."
           else
-            echo "::warning::YOUTUBE_COOKIES secret not set — YouTube downloads may be bot-blocked."
+            echo "::notice::No YOUTUBE_COOKIES secret — using cookieless clients (the normal, reliable path)."
           fi
 
       - name: Resolve target (topic preferred, row_index fallback)

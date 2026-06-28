@@ -21,6 +21,7 @@ error truncated into the Media Status cell for debugging.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import re
@@ -67,6 +68,36 @@ def _youtube_thumbnail_url(video_url: str) -> str:
         return ""
     vid = m.group(1)
     return f"https://img.youtube.com/vi/{vid}/maxresdefault.jpg"
+
+
+def _candidate_video_urls(row: dict) -> list[str]:
+    """Ordered, de-duplicated list of video URLs to try for this row:
+    the primary 'Media Video URL' first, then any VIDEO backups the finder
+    stored in 'Media Backups (JSON)'. This is what lets a row recover when the
+    top pick won't download — we try the next-best on-topic clip instead of
+    skipping (user's rule: no Pexels, no silent skip)."""
+    urls: list[str] = []
+    seen: set[str] = set()
+
+    def _add(u: str) -> None:
+        u = (u or "").strip()
+        if u and u not in seen:
+            seen.add(u)
+            urls.append(u)
+
+    _add(row.get("Media Video URL", ""))
+
+    raw = (row.get("Media Backups (JSON)") or "").strip()
+    if raw:
+        try:
+            data = json.loads(raw)
+            for c in (data.get("video") or []):
+                # backups store both media_url (download target) + page_url;
+                # for YouTube they're the same watch URL.
+                _add(c.get("media_url") or c.get("page_url") or "")
+        except (ValueError, TypeError, AttributeError) as exc:
+            log.warning("Could not parse Media Backups (JSON): %s", exc)
+    return urls
 
 
 def _sheets_config() -> dict:
@@ -337,19 +368,50 @@ def build_reel_for_row(row: dict) -> Path:
     TMP_DIR.mkdir(parents=True, exist_ok=True)
     RENDERS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Download the source video. If it can't be fetched (download blocked,
-    # empty result, error), the post is SKIPPED — no still fallback.
-    log.info("Downloading source video: %s", video_url)
-    try:
-        source_video = fetch_single_clip(video_url, slug, max_seconds=60.0)
-    except Exception as exc:  # noqa: BLE001 — map to skip
+    # Download the source video. We try the primary Media Video URL first, then
+    # any on-topic VIDEO backups the finder stored — so a single un-downloadable
+    # clip no longer skips the whole post (user's rule: no Pexels, no silent
+    # skip; try another YouTube clip, alert only if ALL fail). The multi-client
+    # cookieless yt-dlp logic in media_consumer handles the bot-block per URL.
+    candidates = _candidate_video_urls(row)
+    source_video = None
+    used_url = ""
+    errors: list[str] = []
+    for i, cand in enumerate(candidates, start=1):
+        label = "primary" if i == 1 else f"backup {i - 1}"
+        log.info("Downloading source video (%s of %d, %s): %s",
+                 i, len(candidates), label, cand)
+        try:
+            got = fetch_single_clip(cand, slug, max_seconds=60.0)
+        except Exception as exc:  # noqa: BLE001 — try the next candidate
+            log.warning("  %s failed: %s", label, exc)
+            errors.append(f"{label}: {exc}")
+            continue
+        if got and Path(got).exists() and Path(got).stat().st_size > 0:
+            source_video = got
+            used_url = cand
+            if i > 1:
+                log.info("Recovered using %s (%s) after primary failed.",
+                         label, cand)
+            break
+        log.warning("  %s produced no file.", label)
+        errors.append(f"{label}: produced no file")
+
+    if not source_video:
+        # Every candidate failed. SKIP the post (terminal) AND alert the user —
+        # this is the rare "this row needs a hand-picked link" case.
+        joined = "; ".join(errors) or "no video candidates on the row"
         raise NoVideoError(
-            f"Row {row_index}: source video download failed ({exc})"
-        ) from exc
-    if not source_video or not Path(source_video).exists():
-        raise NoVideoError(
-            f"Row {row_index}: source video produced no file ({video_url})"
+            f"Row {row_index}: ALL {len(candidates)} video candidate(s) failed "
+            f"to download — {joined}"
         )
+
+    # If a backup won, use its URL for the poster-thumbnail derivation below so
+    # the poster matches the clip that actually rendered (the primary may be
+    # permanently dead). The sheet's Media Video URL is left as-is; the build
+    # succeeding is what matters, and the finder will refresh it next run.
+    if used_url and used_url != video_url:
+        video_url = used_url
 
     # Poster: use the row's image if present, else fall back to the video's
     # own thumbnail (always available for a YouTube clip) so a missing image
@@ -448,16 +510,19 @@ def run(row_index: int | None, *, topic: str | None = None, dry_run: bool) -> in
         if not dry_run:
             _try_update(reader, row_index, "Status", SKIPPED_STATUS)
             _try_update(reader, row_index, "Media Status", msg[:200])
+            _alert_no_video(row, row_index, msg)
         return 0
 
     try:
         mp4_path = build_reel_for_row(row)
     except NoVideoError as exc:
-        # No real footage -> SKIP the post (terminal, not a failure/retry).
+        # No real footage even after trying every candidate -> SKIP (terminal,
+        # not a failure/retry) AND alert the user so it's never silent.
         log.warning("Skipping row %d — no usable video: %s", row_index, exc)
         if not dry_run:
             _try_update(reader, row_index, "Status", SKIPPED_STATUS)
             _try_update(reader, row_index, "Media Status", str(exc)[:200])
+            _alert_no_video(row, row_index, str(exc))
         return 0
     except Exception as exc:
         log.error("Build failed: %s", exc)
@@ -552,6 +617,32 @@ def _send_review_email(row: dict, drive_url: str, stage=None) -> None:
         repo=_github_repo(),
     )
     send(subject, body)
+
+
+def _alert_no_video(row: dict, row_index: int, detail: str) -> None:
+    """Email the user that a row couldn't get a usable video, so it's NEVER a
+    silent skip. They can paste a YouTube link into the row's 'YouTube URL'
+    column and re-run. Best-effort: a notify failure must not crash the build.
+    (User rule: no Pexels fallback, no silent skip — alert me instead.)"""
+    try:
+        from publisher.notify_email import send  # late import
+        topic = (row.get("Topic") or "").strip() or f"row {row_index}"
+        subject = f"[GenZ ALERT] No video for reel — {topic}"
+        body = (
+            f"The reel build couldn't download a usable video for this topic, "
+            f"so the post was skipped (no Pexels fallback, by design).\n\n"
+            f"Topic: {topic}\n"
+            f"Row:   {row_index}\n\n"
+            f"What happened:\n{detail}\n\n"
+            f"To fix: open the Reels sheet, paste a working YouTube link into "
+            f"this row's 'YouTube URL' column, set Status back to "
+            f"'Ready to Run', and it'll rebuild using your exact clip.\n"
+        )
+        send(subject, body)
+        log.info("No-video alert email sent for row %d.", row_index)
+    except Exception as exc:  # noqa: BLE001 — alerting must never crash a build
+        log.warning("Could not send no-video alert for row %d: %s",
+                    row_index, exc)
 
 
 def _github_repo() -> str:

@@ -85,18 +85,24 @@ def _http_download(url: str, dest: Path) -> None:
                 f.write(chunk)
 
 
-def _ytdlp_download(url: str, dest: Path) -> None:
-    """Download best portrait-leaning MP4 via yt-dlp."""
-    try:
-        from yt_dlp import YoutubeDL  # type: ignore
-    except ImportError as exc:
-        raise RuntimeError(
-            "yt-dlp is required to download YouTube URLs. "
-            "Run: pip install -r requirements.txt"
-        ) from exc
+# YouTube "player clients" to try, in order. Each is a different API surface
+# YouTube exposes; crucially, several of them do NOT trigger the "Sign in to
+# confirm you're not a bot" gate that blocks the default `web` client from a
+# datacenter IP (GitHub Actions). Trying them in turn means we download WITHOUT
+# needing login cookies — which rot every week or two and were the real cause
+# of rows being skipped "no video found". Order = most-reliable-cookieless first.
+#   tv          — the living-room client; very lenient, rarely bot-gated.
+#   ios / android — mobile app clients; separate quota, usually cookieless-ok.
+#   web_safari  — desktop Safari surface; sometimes works when `web` is gated.
+# `web` is intentionally LAST (and only with cookies) because it's the one that
+# bot-blocks. See yt-dlp wiki: Extractors#youtube player_client.
+_YT_CLIENTS_COOKIELESS = ("tv", "ios", "android", "web_safari")
+_YT_CLIENTS_WITH_COOKIES = ("web", "tv", "ios")
 
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    ydl_opts = {
+
+def _ytdlp_base_opts(dest: Path) -> dict:
+    """Shared yt-dlp options for every client attempt."""
+    opts = {
         # Permissive: any video+audio, merged to mp4. The strict ext=mp4
         # filter could leave "Requested format is not available" when the
         # chosen player client only exposes webm/av1 streams.
@@ -107,31 +113,113 @@ def _ytdlp_download(url: str, dest: Path) -> None:
         "merge_output_format": "mp4",
         "retries": 5,
         "fragment_retries": 5,
-        # YouTube now gates real format URLs behind a JS "n challenge".
-        # yt-dlp solves it with a JS runtime (Deno) plus the EJS solver
-        # scripts fetched from GitHub. Without this, only storyboard images
-        # are offered -> "Requested format is not available".
+        # YouTube gates real format URLs behind a JS "n challenge". yt-dlp
+        # solves it with a JS runtime (Deno) + the EJS solver from GitHub.
+        # Without this, only storyboard images are offered.
         "remote_components": ["ejs:github"],
     }
-
     ff = _resolve_ffmpeg()
     if ff and ff != "ffmpeg":
         # yt-dlp merges video+audio with ffmpeg; point it at the resolved
         # binary so local runs (no ffmpeg on PATH) work like CI does.
-        ydl_opts["ffmpeg_location"] = ff
+        opts["ffmpeg_location"] = ff
+    return opts
+
+
+def _is_bot_block(exc: Exception) -> bool:
+    """True when an error is YouTube's anti-bot gate (vs. a genuinely dead
+    video, geo-block, etc.) — those are the ones a different client can fix."""
+    msg = str(exc).lower()
+    return (
+        "confirm you" in msg          # "Sign in to confirm you're not a bot"
+        or "not a bot" in msg
+        or "sign in to confirm" in msg
+        or "requested format is not available" in msg  # client saw no real fmt
+        or "unable to extract" in msg
+    )
+
+
+def _ytdlp_download(url: str, dest: Path) -> None:
+    """Download the best portrait-leaning MP4 via yt-dlp, trying multiple
+    YouTube player clients so we don't depend on (rot-prone) login cookies.
+
+    Strategy:
+      1. Try a sequence of COOKIELESS clients (tv/ios/android/web_safari).
+         Most YouTube videos download from at least one of these without any
+         login — so a missing/expired cookie no longer means "no video".
+      2. If cookies ARE present, also try the cookie'd `web` client (some
+         age-gated/region clips still need it). Cookies are now a BONUS, not a
+         requirement.
+    A bot-block on one client is retried on the next; a non-bot error (truly
+    dead/removed video) stops early so we don't waste time on hopeless URLs.
+    """
+    try:
+        from yt_dlp import YoutubeDL  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError(
+            "yt-dlp is required to download YouTube URLs. "
+            "Run: pip install -r requirements.txt"
+        ) from exc
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
 
     cookiefile = _youtube_cookiefile()
-    if cookiefile:
-        log.info("Using YouTube cookies: %s", cookiefile)
-        ydl_opts["cookiefile"] = cookiefile
-    else:
-        log.warning(
-            "No YouTube cookies file found — datacenter IPs (e.g. CI) may be "
-            "bot-blocked. Set the YOUTUBE_COOKIES secret to fix this."
-        )
 
-    with YoutubeDL(ydl_opts) as ydl:
-        ydl.download([url])
+    # Build the ordered list of (client, use_cookies) attempts.
+    attempts: list[tuple[str, bool]] = [
+        (c, False) for c in _YT_CLIENTS_COOKIELESS
+    ]
+    if cookiefile:
+        log.info("YouTube cookies found (%s) — adding cookie'd clients as "
+                 "backup attempts.", cookiefile)
+        # Append cookie'd clients we haven't already tried cookieless.
+        for c in _YT_CLIENTS_WITH_COOKIES:
+            attempts.append((c, True))
+    else:
+        log.info("No YouTube cookies — relying on cookieless clients "
+                 "(%s). This is expected and fine.",
+                 ", ".join(_YT_CLIENTS_COOKIELESS))
+
+    last_exc: Exception | None = None
+    for client, use_cookies in attempts:
+        opts = _ytdlp_base_opts(dest)
+        opts["extractor_args"] = {"youtube": {"player_client": [client]}}
+        if use_cookies and cookiefile:
+            opts["cookiefile"] = cookiefile
+        # A stale partial download from a failed client must not poison the
+        # next attempt — yt-dlp would otherwise resume a 0-byte/partial file.
+        for leftover in dest.parent.glob(dest.name + "*"):
+            try:
+                leftover.unlink()
+            except OSError:
+                pass
+        try:
+            log.info("yt-dlp attempt: client=%s cookies=%s", client, use_cookies)
+            with YoutubeDL(opts) as ydl:
+                ydl.download([url])
+            if dest.exists() and dest.stat().st_size > 0:
+                log.info("yt-dlp SUCCESS via client=%s%s", client,
+                         " (with cookies)" if use_cookies else "")
+                return
+            # Downloaded "successfully" but produced nothing usable — treat as
+            # a soft failure and try the next client.
+            log.warning("client=%s produced no file — trying next client.",
+                        client)
+        except Exception as exc:  # noqa: BLE001 — we classify + continue
+            last_exc = exc
+            if _is_bot_block(exc):
+                log.warning("client=%s bot-blocked/no-format — trying next.",
+                            client)
+                continue
+            # A non-bot error (private/removed/geo video) won't be fixed by
+            # another client. Stop now with a clear message.
+            log.error("client=%s hit a non-recoverable error: %s", client, exc)
+            raise
+
+    raise RuntimeError(
+        f"All YouTube clients failed to download {url}. "
+        f"Last error: {last_exc}"
+    )
 
 
 def _ffmpeg_cut_to_beat(src: Path, dest: Path, duration_s: float) -> None:
