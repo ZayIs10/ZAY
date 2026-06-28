@@ -12,6 +12,17 @@ name: Build Tweet-Card Reel
 #   }
 #
 # Also runnable manually from the GitHub Actions UI (specify row_index).
+#
+# RUNS ON A SELF-HOSTED RUNNER (the user's own PC), NOT GitHub's servers.
+# Why: YouTube permanently bot-blocks datacenter IPs (GitHub Actions) with
+# "Sign in to confirm you're not a bot" — no login fixes it, it's the IP.
+# Running the download from the user's home internet is the only reliable,
+# free, automatic fix. If the PC is OFF, the job simply QUEUES and runs the
+# moment the PC comes back online (it never fails red for being offline).
+# The runner auto-starts at logon (scheduled task "GitHubActionsRunner-GenZ").
+#
+# Tools are pre-installed on the PC (Python 3.13, ffmpeg via winget, Deno,
+# yt-dlp, node). The steps below VERIFY them rather than install them.
 
 on:
   repository_dispatch:
@@ -29,8 +40,15 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Self-hosted runner on the user's PC. All three labels must match the
+    # runner registered as "marc-pc" (self-hosted, windows, genz-pc).
+    runs-on: [self-hosted, windows, genz-pc]
+    timeout-minutes: 45
+
+    # Every run step is PowerShell — the runner is Windows, not Linux.
+    defaults:
+      run:
+        shell: pwsh
 
     env:
       GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
@@ -56,57 +74,84 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
 
-      - name: Install ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
-
-      - name: Install Deno (JS runtime for yt-dlp YouTube challenge solver)
-        # YouTube gates real format URLs behind a JS "n challenge" that
-        # yt-dlp solves via a JS runtime + the EJS solver. Without Deno,
-        # only storyboard images are available and the build fails.
+      - name: Verify build tools are present (ffmpeg, Deno, node)
+        # On the self-hosted PC these are installed once (ffmpeg via winget,
+        # Deno + node already present). We VERIFY rather than install. ffmpeg
+        # is the one that can be missing from PATH right after a winget install
+        # until the shell restarts — the runner service picks up the user PATH
+        # on its next start, so this should pass. If ffmpeg is genuinely
+        # missing we surface a clear error instead of failing deep in the build.
         run: |
-          curl -fsSL https://deno.land/install.sh | sh -s -- -y
-          echo "$HOME/.deno/bin" >> "$GITHUB_PATH"
-
-      - name: Verify Deno
-        run: deno --version
+          $ok = $true
+          foreach ($tool in 'ffmpeg','deno','node') {
+            $cmd = Get-Command $tool -ErrorAction SilentlyContinue
+            if ($cmd) {
+              Write-Host "OK  $tool -> $($cmd.Source)"
+            } else {
+              Write-Host "::warning::$tool not found on PATH"
+              if ($tool -eq 'ffmpeg') { $ok = $false }
+            }
+          }
+          if (-not $ok) {
+            Write-Host "::error::ffmpeg is required for muxing but was not found on PATH. Restart the runner so it picks up the updated PATH (winget added ffmpeg)."
+            exit 1
+          }
 
       - name: Install Python dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install yt-dlp
 
       - name: Write .env
+        # OVERWRITE (not append): a self-hosted runner reuses the same working
+        # directory across runs, and .env is gitignored so checkout won't wipe
+        # it. Starting fresh each run avoids stale/duplicate keys piling up.
         run: |
-          printf "GOOGLE_SHEET_ID=%s\n" "$GOOGLE_SHEET_ID" >> .env
-          printf "GOOGLE_SHEET_REELS_NAME=%s\n" "$GOOGLE_SHEET_REELS_NAME" >> .env
-          printf "YOUTUBE_API_KEY=%s\n" "$YOUTUBE_API_KEY" >> .env
+          $lines = @(
+            "GOOGLE_SHEET_ID=$env:GOOGLE_SHEET_ID"
+            "GOOGLE_SHEET_REELS_NAME=$env:GOOGLE_SHEET_REELS_NAME"
+            "YOUTUBE_API_KEY=$env:YOUTUBE_API_KEY"
+          )
+          Set-Content -Path .env -Value $lines -Encoding utf8
 
       - name: Write Google service account
-        run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > google_service_account.json
+        # Pass the secret through the ENV (not inline ${{ }}) so PowerShell
+        # never reinterprets braces/quotes inside the JSON, and write it as
+        # raw UTF-8 with no BOM so Python's json loader is happy.
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          [System.IO.File]::WriteAllText("$PWD/google_service_account.json", $env:GOOGLE_SERVICE_ACCOUNT_JSON)
 
       - name: Write Drive OAuth token
         # Pre-authorized token JSON (run publish_reel.py locally once to mint it,
         # then copy the contents of google_drive_token.json into this secret).
-        run: echo '${{ secrets.GOOGLE_DRIVE_TOKEN_JSON }}' > google_drive_token.json
+        env:
+          GOOGLE_DRIVE_TOKEN_JSON: ${{ secrets.GOOGLE_DRIVE_TOKEN_JSON }}
+        run: |
+          if (-not [string]::IsNullOrWhiteSpace($env:GOOGLE_DRIVE_TOKEN_JSON)) {
+            [System.IO.File]::WriteAllText("$PWD/google_drive_token.json", $env:GOOGLE_DRIVE_TOKEN_JSON)
+          }
 
       - name: Write YouTube cookies (OPTIONAL — cookieless is the default)
-        # Downloads now use multiple cookieless YouTube player clients
+        # Downloads use multiple cookieless YouTube player clients
         # (tv/ios/android/web_safari) and try each until one works, so login
-        # cookies are NO LONGER REQUIRED — that's what kept breaking (the
-        # YOUTUBE_COOKIES secret rots every week and silently skipped rows).
-        # If the secret IS present we still write it as a bonus for the rare
-        # age-gated clip; if it's empty that's totally normal — NOT a warning.
+        # cookies are NOT required. From this self-hosted PC's home IP the
+        # cookieless path works reliably (YouTube trusts residential IPs). If
+        # the secret IS present we still write it as a bonus for rare age-gated
+        # clips; empty is totally normal — NOT a warning.
         env:
           YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
         run: |
-          if [ -n "$YOUTUBE_COOKIES" ]; then
-            printf '%s\n' "$YOUTUBE_COOKIES" > youtube_cookies.txt
-            echo "Wrote youtube_cookies.txt ($(wc -l < youtube_cookies.txt) lines) — used as a bonus backup."
-          else
-            echo "::notice::No YOUTUBE_COOKIES secret — using cookieless clients (the normal, reliable path)."
-          fi
+          if ([string]::IsNullOrWhiteSpace($env:YOUTUBE_COOKIES)) {
+            Write-Host "::notice::No YOUTUBE_COOKIES secret — using cookieless clients from the home IP (the normal, reliable path)."
+          } else {
+            $env:YOUTUBE_COOKIES | Out-File -FilePath youtube_cookies.txt -Encoding ascii
+            $lines = (Get-Content youtube_cookies.txt | Measure-Object -Line).Lines
+            Write-Host "Wrote youtube_cookies.txt ($lines lines) — used as a bonus backup."
+          }
 
       - name: Resolve target (topic preferred, row_index fallback)
         id: target
@@ -117,41 +162,37 @@ jobs:
           TOPIC: ${{ github.event.client_payload.topic || github.event.inputs.topic }}
           ROW_INDEX: ${{ github.event.client_payload.row_index || github.event.inputs.row_index }}
         run: |
-          if [ -n "$TOPIC" ]; then
-            echo "mode=topic" >> "$GITHUB_OUTPUT"
-            echo "topic=$TOPIC" >> "$GITHUB_OUTPUT"
-            echo "Building reel for Topic: $TOPIC"
-          elif [ -n "$ROW_INDEX" ]; then
-            echo "mode=row" >> "$GITHUB_OUTPUT"
-            echo "row=$ROW_INDEX" >> "$GITHUB_OUTPUT"
-            echo "Building reel for Reels row $ROW_INDEX (no topic given)"
-          else
-            echo "::error::Neither topic nor row_index provided"
+          if (-not [string]::IsNullOrWhiteSpace($env:TOPIC)) {
+            "mode=topic"        | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "topic=$env:TOPIC"  | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            Write-Host "Building reel for Topic: $env:TOPIC"
+          } elseif (-not [string]::IsNullOrWhiteSpace($env:ROW_INDEX)) {
+            "mode=row"          | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "row=$env:ROW_INDEX" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            Write-Host "Building reel for Reels row $env:ROW_INDEX (no topic given)"
+          } else {
+            Write-Host "::error::Neither topic nor row_index provided"
             exit 1
-          fi
+          }
 
       - name: Build reel
         env:
-          # Pass the topic through the ENV, not inline ${{ }} interpolation.
-          # GitHub substitutes ${{ }} into the script as literal text BEFORE
-          # bash runs, so a topic containing "$1" (e.g. "Worth Almost $1
-          # Trillion") would be eaten by the shell as a positional parameter —
-          # the exact bug that made the topic arrive as "Almost  Trillion" and
-          # match no row. A double-quoted env var is never re-expanded, so the
-          # "$1" survives intact.
           TOPIC: ${{ steps.target.outputs.topic }}
           ROW: ${{ steps.target.outputs.row }}
           MODE: ${{ steps.target.outputs.mode }}
         run: |
-          set -o pipefail   # fail the step if python fails, not just tee
-          mkdir -p logs renders
-          if [ "$MODE" = "topic" ]; then
-            python publisher/tweet_card_reel.py --topic "$TOPIC" 2>&1 \
-              | tee "logs/tweet_card_reel.log"
-          else
-            python publisher/tweet_card_reel.py --row "$ROW" 2>&1 \
-              | tee "logs/tweet_card_reel_row${ROW}.log"
-          fi
+          New-Item -ItemType Directory -Force -Path logs, renders | Out-Null
+          $ErrorActionPreference = 'Continue'
+          if ($env:MODE -eq 'topic') {
+            python publisher/tweet_card_reel.py --topic "$env:TOPIC" 2>&1 | Tee-Object -FilePath "logs/tweet_card_reel.log"
+          } else {
+            python publisher/tweet_card_reel.py --row "$env:ROW" 2>&1 | Tee-Object -FilePath "logs/tweet_card_reel_row$($env:ROW).log"
+          }
+          # Propagate the Python exit code so a real build failure fails the step.
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::tweet_card_reel.py exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
 
       - name: Upload logs
         if: always()
