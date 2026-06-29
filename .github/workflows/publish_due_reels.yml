@@ -17,8 +17,14 @@ name: Publish Due Reels (8pm SGT)
 # Also runnable manually from the Actions UI (with an optional dry-run).
 
 "on":
-  schedule:
-    - cron: "0 12 * * *"        # 12:00 UTC = 20:00 SGT, every day
+  # AUTO-PUBLISH DISABLED (2026-06-29, by user request).
+  # The build still renders + uploads to Drive + emails the link, but nothing
+  # posts to Instagram automatically anymore — the user reviews and posts
+  # manually from the Drive link. The daily cron below is intentionally
+  # commented out. Manual publishing is still available via the Actions "Run
+  # workflow" button (workflow_dispatch) if it's ever wanted.
+  # schedule:
+  #   - cron: "0 12 * * *"        # 12:00 UTC = 20:00 SGT, every day
   workflow_dispatch:
     inputs:
       dry_run:
