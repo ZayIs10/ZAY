@@ -124,13 +124,28 @@ _YT_CLIENTS_COOKIELESS = ("tv", "ios", "android", "web_safari")
 _YT_CLIENTS_WITH_COOKIES = ("web", "tv", "ios")
 
 
-def _ytdlp_base_opts(dest: Path) -> dict:
-    """Shared yt-dlp options for every client attempt."""
+def _ytdlp_base_opts(dest: Path, section_seconds: float | None = None) -> dict:
+    """Shared yt-dlp options for every client attempt.
+
+    `section_seconds`: if set, download ONLY the first N seconds of the video
+    instead of the whole thing. The reel only ever uses the START of the source
+    clip (the compositor trims to <=60s from the beginning), so for a 10-minute
+    source this fetches ~60s and skips the rest — a big bandwidth saving with
+    ZERO quality loss. This matters whenever the download is metered: it makes
+    a future residential proxy nearly free, and it speeds up every build today.
+    Implemented via yt-dlp `download_ranges`, which makes the DASH downloader
+    fetch only the fragments covering [0, N]; the compositor still does the
+    exact final cut, so frame-accurate boundaries aren't needed here.
+    """
     opts = {
         # Permissive: any video+audio, merged to mp4. The strict ext=mp4
         # filter could leave "Requested format is not available" when the
         # chosen player client only exposes webm/av1 streams.
-        "format": "bv*+ba/b",
+        # Cap height at 1440p: the reel output is 1080x1920, so a 4K source is
+        # pure wasted bandwidth (invisible once centre-cropped to 1080 wide) —
+        # 1440p already gives ample detail. Falls back to best if a client
+        # exposes nothing <=1440p, so format selection never fails.
+        "format": "bv*[height<=1440]+ba/b[height<=1440]/bv*+ba/b",
         "outtmpl": str(dest),
         "quiet": True,
         "no_warnings": True,
@@ -142,6 +157,12 @@ def _ytdlp_base_opts(dest: Path) -> dict:
         # Without this, only storyboard images are offered.
         "remote_components": ["ejs:github"],
     }
+    if section_seconds and section_seconds > 0:
+        # Download only [0, section_seconds]. download_range_func lives in
+        # yt_dlp.utils; import lazily so this module still loads without yt-dlp.
+        from yt_dlp.utils import download_range_func  # type: ignore
+        opts["download_ranges"] = download_range_func(
+            None, [(0.0, float(section_seconds))])
     ff = _resolve_ffmpeg()
     if ff and ff != "ffmpeg":
         # yt-dlp merges video+audio with ffmpeg; point it at the resolved
@@ -163,9 +184,14 @@ def _is_bot_block(exc: Exception) -> bool:
     )
 
 
-def _ytdlp_download(url: str, dest: Path) -> None:
+def _ytdlp_download(url: str, dest: Path,
+                    section_seconds: float | None = None) -> None:
     """Download the best portrait-leaning MP4 via yt-dlp, trying multiple
     YouTube player clients so we don't depend on (rot-prone) login cookies.
+
+    `section_seconds` (optional) limits the download to the first N seconds of
+    the video — see _ytdlp_base_opts. Pass it whenever the caller only needs the
+    opening of the clip (the reel always does) to avoid pulling the whole file.
 
     Strategy:
       1. Try a sequence of COOKIELESS clients (tv/ios/android/web_safari).
@@ -206,7 +232,7 @@ def _ytdlp_download(url: str, dest: Path) -> None:
 
     last_exc: Exception | None = None
     for client, use_cookies in attempts:
-        opts = _ytdlp_base_opts(dest)
+        opts = _ytdlp_base_opts(dest, section_seconds=section_seconds)
         opts["extractor_args"] = {"youtube": {"player_client": [client]}}
         if use_cookies and cookiefile:
             opts["cookiefile"] = cookiefile
@@ -278,9 +304,13 @@ def fetch_video(url: str, slug: str, durations: list[float]) -> list[str]:
     CLIP_DIR.mkdir(parents=True, exist_ok=True)
     raw = CLIP_DIR / f"_auto_raw_{slug}.mp4"
 
+    # Each beat is cut from the START of the source (see _ffmpeg_cut_to_beat),
+    # so the deepest any beat reaches is the longest single beat. Download only
+    # that much (+2s buffer) rather than the whole video.
+    section = (max(durations) + 2.0) if durations else None
     if _is_youtube(url):
         log.info("Downloading YouTube clip via yt-dlp: %s", url)
-        _ytdlp_download(url, raw)
+        _ytdlp_download(url, raw, section_seconds=section)
     else:
         log.info("Downloading direct video: %s", url)
         _http_download(url, raw)
@@ -309,7 +339,10 @@ def fetch_single_clip(url: str, slug: str, *, max_seconds: float = 60.0) -> Path
 
     if _is_youtube(url):
         log.info("Downloading YouTube clip via yt-dlp: %s", url)
-        _ytdlp_download(url, raw)
+        # The reel uses at most `max_seconds` from the START of the clip (the
+        # compositor trims to that), so only download that opening section — a
+        # 10-min source no longer pulls 10 min of data. +2s is a safety buffer.
+        _ytdlp_download(url, raw, section_seconds=max_seconds + 2.0)
     else:
         log.info("Downloading direct video: %s", url)
         _http_download(url, raw)
