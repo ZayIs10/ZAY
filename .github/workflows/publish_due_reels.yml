@@ -6,8 +6,9 @@ name: Publish Due Reels (8pm SGT)
 # silently ignored and the reel posts instantly (verified against a live post
 # 2026-06-18). So GitHub does the scheduling: the reel build renders + uploads
 # to Drive and leaves the row at Status="Ready to Post". This cron runs at the
-# peak Singapore/Malaysia evening window and publishes every queued reel, so
-# they go live at 8pm SGT no matter when they rendered.
+# peak Singapore/Malaysia evening window and publishes ONE queued reel per day
+# (the script's default cap) — so at most one reel goes live per day at 8pm SGT.
+# If several are queued they drain one-per-day on the following days.
 #
 # Schedule: 12:00 UTC daily = 8:00 PM SGT/MYT (UTC+8), every day.
 # (GitHub cron is always UTC and can lag a few minutes under load — that's fine
@@ -29,7 +30,7 @@ name: Publish Due Reels (8pm SGT)
           - "false"
           - "true"
       limit:
-        description: "Max reels to publish this run (blank = no cap)"
+        description: "Max reels to publish (blank = 1/one per day; 0 = all due)"
         required: false
         type: string
 
@@ -93,7 +94,7 @@ jobs:
         continue-on-error: true
         run: python publisher/check_ig_token.py
 
-      - name: Publish all due reels
+      - name: Publish due reels (one per day by default)
         env:
           DRY_RUN: ${{ github.event.inputs.dry_run }}
           LIMIT: ${{ github.event.inputs.limit }}
@@ -102,6 +103,9 @@ jobs:
           mkdir -p logs
           ARGS=""
           if [ "$DRY_RUN" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          # On the daily cron no LIMIT is passed → the script's default of 1
+          # applies = exactly one post per day. A manual run can override
+          # (set the limit input to 0 for "all due", or to N for a custom cap).
           if [ -n "$LIMIT" ]; then ARGS="$ARGS --limit $LIMIT"; fi
           echo "Running: python publisher/publish_due_reels.py $ARGS"
           python publisher/publish_due_reels.py $ARGS 2>&1 \
