@@ -101,7 +101,11 @@ def _is_youtube(url: str) -> bool:
 
 def _http_download(url: str, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
-    r = requests.get(url, timeout=60, stream=True)
+    # Route direct downloads through the residential proxy too when PROXY_URL is
+    # set (same reason as yt-dlp — see _ytdlp_base_opts). No-op when unset.
+    proxy = os.environ.get("PROXY_URL", "").strip()
+    proxies = {"http": proxy, "https": proxy} if proxy else None
+    r = requests.get(url, timeout=60, stream=True, proxies=proxies)
     r.raise_for_status()
     with dest.open("wb") as f:
         for chunk in r.iter_content(chunk_size=64 * 1024):
@@ -163,6 +167,16 @@ def _ytdlp_base_opts(dest: Path, section_seconds: float | None = None) -> dict:
         from yt_dlp.utils import download_range_func  # type: ignore
         opts["download_ranges"] = download_range_func(
             None, [(0.0, float(section_seconds))])
+    # Residential proxy (DataImpulse). When PROXY_URL is set, route every
+    # download through it so the build can run on GitHub's CLOUD runners — whose
+    # datacenter IPs YouTube permanently bot-blocks — with the user's PC OFF.
+    # The proxy gives the request a residential IP YouTube trusts. Pay-as-you-go
+    # (~$1/GB); the section-download above keeps each clip to a few MB (~1c/run).
+    # When PROXY_URL is UNSET behaviour is identical to before, so the
+    # self-hosted-PC path still works unchanged as a free fallback.
+    proxy = os.environ.get("PROXY_URL", "").strip()
+    if proxy:
+        opts["proxy"] = proxy
     ff = _resolve_ffmpeg()
     if ff and ff != "ffmpeg":
         # yt-dlp merges video+audio with ffmpeg; point it at the resolved
@@ -212,6 +226,11 @@ def _ytdlp_download(url: str, dest: Path,
         ) from exc
 
     dest.parent.mkdir(parents=True, exist_ok=True)
+
+    if os.environ.get("PROXY_URL", "").strip():
+        # Never log the proxy URL itself — it contains the login:password.
+        log.info("PROXY_URL set — routing YouTube download through residential "
+                 "proxy (cloud-runner / laptop-off mode).")
 
     cookiefile = _youtube_cookiefile()
 

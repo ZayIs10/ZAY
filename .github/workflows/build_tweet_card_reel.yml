@@ -13,16 +13,18 @@ name: Build Tweet-Card Reel
 #
 # Also runnable manually from the GitHub Actions UI (specify row_index).
 #
-# RUNS ON A SELF-HOSTED RUNNER (the user's own PC), NOT GitHub's servers.
-# Why: YouTube permanently bot-blocks datacenter IPs (GitHub Actions) with
-# "Sign in to confirm you're not a bot" — no login fixes it, it's the IP.
-# Running the download from the user's home internet is the only reliable,
-# free, automatic fix. If the PC is OFF, the job simply QUEUES and runs the
-# moment the PC comes back online (it never fails red for being offline).
-# The runner auto-starts at logon (scheduled task "GitHubActionsRunner-GenZ").
+# RUNS IN GITHUB'S CLOUD (ubuntu-latest) — the user's PC can stay OFF.
+# Why this works now: YouTube permanently bot-blocks datacenter IPs (GitHub
+# Actions) with "Sign in to confirm you're not a bot". We get past it by routing
+# the yt-dlp download through a DataImpulse RESIDENTIAL proxy (secret PROXY_URL),
+# which gives the request a residential IP YouTube trusts. Pay-as-you-go (~$1/GB);
+# the build only downloads the used section of each clip (~a few MB, ~1c/run).
 #
-# Tools are pre-installed on the PC (Python 3.13, ffmpeg via winget, Deno,
-# yt-dlp, node). The steps below VERIFY them rather than install them.
+# Fallback: if PROXY_URL is ever unset, the download falls back to the cookieless
+# clients (which fail from a datacenter IP) — so keep the secret set. The old
+# self-hosted-PC runner remains a valid alternative if you ever drop the proxy
+# (set runs-on back to [self-hosted, windows, genz-pc] and use the pwsh steps in
+# git history).
 
 on:
   repository_dispatch:
@@ -40,21 +42,18 @@ on:
 
 jobs:
   build:
-    # Self-hosted runner on the user's PC. All three labels must match the
-    # runner registered as "marc-pc" (self-hosted, windows, genz-pc).
-    runs-on: [self-hosted, windows, genz-pc]
+    runs-on: ubuntu-latest
     timeout-minutes: 45
-
-    # Every run step is PowerShell — the runner is Windows, not Linux.
-    defaults:
-      run:
-        shell: pwsh
 
     env:
       GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
       GOOGLE_SHEET_REELS_NAME: Reels
       YOUTUBE_COOKIES_FILE: youtube_cookies.txt
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      # Residential proxy — the load-bearing secret that lets the cloud download
+      # YouTube clips (datacenter IPs are bot-blocked). Built from the
+      # DataImpulse login:password@host:port. See media_consumer._ytdlp_base_opts.
+      PROXY_URL: ${{ secrets.PROXY_URL }}
       # Instagram staging (upload + process the reel; the user taps Publish).
       # If unset the build still succeeds — it skips IG staging and the review
       # email tells the user to post from the Drive link instead.
@@ -70,104 +69,67 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # NOTE: we deliberately do NOT use actions/setup-python here. On a
-      # self-hosted Windows runner that action hangs trying to provision a
-      # tool-cache Python that doesn't exist on a normal PC (it stalled this
-      # job for the full 45-min timeout once). The PC already has a working
-      # Python (3.13) plus ffmpeg/Deno/node — we just verify and use them.
-      - name: Verify build tools + put winget ffmpeg on PATH
-        # ffmpeg is installed once via winget (a FULL build that supports -crf).
-        # The runner service caches PATH from before that install, so ffmpeg may
-        # not be on PATH yet — we FIND the winget binary and add its bin dir to
-        # GITHUB_PATH so every later step (and shutil.which in the code) sees the
-        # good ffmpeg, NOT the stripped CapCut/bundled builds that reject -crf.
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install ffmpeg + Deno
+        # ffmpeg: full build from apt supports -crf (the stripped builds don't).
+        # Deno: yt-dlp's JS runtime for the YouTube "n challenge" solver.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          curl -fsSL https://deno.land/install.sh | sh
+          echo "$HOME/.deno/bin" >> "$GITHUB_PATH"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install yt-dlp
+
+      - name: Verify tools
         run: |
           python --version
-          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
-            $ff = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Recurse -Filter ffmpeg.exe -ErrorAction SilentlyContinue |
-                  Where-Object { $_.FullName -match 'Gyan\.FFmpeg' } | Select-Object -First 1
-            if ($ff) {
-              $bin = Split-Path $ff.FullName
-              Add-Content -Path $env:GITHUB_PATH -Value $bin
-              Write-Host "Added winget ffmpeg to PATH: $bin"
-            } else {
-              Write-Host "::warning::winget ffmpeg not found; the code's resolver will still locate it via its known install path."
-            }
-          } else {
-            Write-Host "ffmpeg already on PATH: $((Get-Command ffmpeg).Source)"
-          }
-          foreach ($tool in 'deno','node') {
-            $c = Get-Command $tool -ErrorAction SilentlyContinue
-            if ($c) { Write-Host "OK  $tool -> $($c.Source)" } else { Write-Host "::warning::$tool not on PATH (yt-dlp can still run; JS solver may degrade)" }
-          }
-
-      - name: Install Python dependencies (persistent venv)
-        # Use a venv that lives OUTSIDE the repo so `actions/checkout` clean
-        # never deletes it — installs are slow the first run, then near-instant
-        # on every later run (the self-hosted PC reuses it). Keeps the build's
-        # deps out of the user's global site-packages too.
-        id: venv
-        run: |
-          $venv = "C:\actions-runner\genz-venv"
-          if (-not (Test-Path "$venv\Scripts\python.exe")) {
-            Write-Host "Creating venv at $venv ..."
-            python -m venv $venv
-          }
-          $py = "$venv\Scripts\python.exe"
-          & $py -m pip install --upgrade pip
-          & $py -m pip install -r requirements.txt
-          & $py -m pip install yt-dlp
-          "python=$py" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          Write-Host "Using venv python: $py"
+          ffmpeg -version | head -1
+          deno --version | head -1 || echo "::warning::deno not found (yt-dlp JS solver may degrade)"
 
       - name: Write .env
-        # OVERWRITE (not append): a self-hosted runner reuses the same working
-        # directory across runs, and .env is gitignored so checkout won't wipe
-        # it. Starting fresh each run avoids stale/duplicate keys piling up.
         run: |
-          $lines = @(
-            "GOOGLE_SHEET_ID=$env:GOOGLE_SHEET_ID"
-            "GOOGLE_SHEET_REELS_NAME=$env:GOOGLE_SHEET_REELS_NAME"
-            "YOUTUBE_API_KEY=$env:YOUTUBE_API_KEY"
-          )
-          Set-Content -Path .env -Value $lines -Encoding utf8
+          {
+            printf "GOOGLE_SHEET_ID=%s\n" "$GOOGLE_SHEET_ID"
+            printf "GOOGLE_SHEET_REELS_NAME=%s\n" "$GOOGLE_SHEET_REELS_NAME"
+            printf "YOUTUBE_API_KEY=%s\n" "$YOUTUBE_API_KEY"
+            [ -n "$PROXY_URL" ] && printf "PROXY_URL=%s\n" "$PROXY_URL"
+            true
+          } > .env
 
       - name: Write Google service account
-        # Pass the secret through the ENV (not inline ${{ }}) so PowerShell
-        # never reinterprets braces/quotes inside the JSON, and write it as
-        # raw UTF-8 with no BOM so Python's json loader is happy.
-        env:
-          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-        run: |
-          [System.IO.File]::WriteAllText("$PWD/google_service_account.json", $env:GOOGLE_SERVICE_ACCOUNT_JSON)
+        run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > google_service_account.json
 
       - name: Write Drive OAuth token
         # Pre-authorized token JSON (run publish_reel.py locally once to mint it,
         # then copy the contents of google_drive_token.json into this secret).
-        env:
-          GOOGLE_DRIVE_TOKEN_JSON: ${{ secrets.GOOGLE_DRIVE_TOKEN_JSON }}
         run: |
-          if (-not [string]::IsNullOrWhiteSpace($env:GOOGLE_DRIVE_TOKEN_JSON)) {
-            [System.IO.File]::WriteAllText("$PWD/google_drive_token.json", $env:GOOGLE_DRIVE_TOKEN_JSON)
-          }
+          if [ -n '${{ secrets.GOOGLE_DRIVE_TOKEN_JSON }}' ]; then
+            echo '${{ secrets.GOOGLE_DRIVE_TOKEN_JSON }}' > google_drive_token.json
+          fi
 
-      - name: Write YouTube cookies (OPTIONAL — cookieless is the default)
-        # Downloads use multiple cookieless YouTube player clients
-        # (tv/ios/android/web_safari) and try each until one works, so login
-        # cookies are NOT required. From this self-hosted PC's home IP the
-        # cookieless path works reliably (YouTube trusts residential IPs). If
-        # the secret IS present we still write it as a bonus for rare age-gated
-        # clips; empty is totally normal — NOT a warning.
+      - name: Write YouTube cookies (OPTIONAL — proxy + cookieless is the default)
+        # Downloads use cookieless YouTube player clients through the residential
+        # proxy, so login cookies are NOT required. If the secret IS present we
+        # still write it as a bonus for rare age-gated clips; empty is normal.
         env:
           YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:YOUTUBE_COOKIES)) {
-            Write-Host "::notice::No YOUTUBE_COOKIES secret — using cookieless clients from the home IP (the normal, reliable path)."
-          } else {
-            $env:YOUTUBE_COOKIES | Out-File -FilePath youtube_cookies.txt -Encoding ascii
-            $lines = (Get-Content youtube_cookies.txt | Measure-Object -Line).Lines
-            Write-Host "Wrote youtube_cookies.txt ($lines lines) — used as a bonus backup."
-          }
+          if [ -z "$YOUTUBE_COOKIES" ]; then
+            echo "::notice::No YOUTUBE_COOKIES secret — using cookieless clients through the proxy (the normal path)."
+          else
+            printf '%s' "$YOUTUBE_COOKIES" > youtube_cookies.txt
+            echo "Wrote youtube_cookies.txt ($(wc -l < youtube_cookies.txt) lines) — used as a bonus backup."
+          fi
 
       - name: Resolve target (topic preferred, row_index fallback)
         id: target
@@ -178,38 +140,32 @@ jobs:
           TOPIC: ${{ github.event.client_payload.topic || github.event.inputs.topic }}
           ROW_INDEX: ${{ github.event.client_payload.row_index || github.event.inputs.row_index }}
         run: |
-          if (-not [string]::IsNullOrWhiteSpace($env:TOPIC)) {
-            "mode=topic"        | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-            "topic=$env:TOPIC"  | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-            Write-Host "Building reel for Topic: $env:TOPIC"
-          } elseif (-not [string]::IsNullOrWhiteSpace($env:ROW_INDEX)) {
-            "mode=row"          | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-            "row=$env:ROW_INDEX" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-            Write-Host "Building reel for Reels row $env:ROW_INDEX (no topic given)"
-          } else {
-            Write-Host "::error::Neither topic nor row_index provided"
+          if [ -n "$TOPIC" ]; then
+            echo "mode=topic" >> "$GITHUB_OUTPUT"
+            echo "topic=$TOPIC" >> "$GITHUB_OUTPUT"
+            echo "Building reel for Topic: $TOPIC"
+          elif [ -n "$ROW_INDEX" ]; then
+            echo "mode=row" >> "$GITHUB_OUTPUT"
+            echo "row=$ROW_INDEX" >> "$GITHUB_OUTPUT"
+            echo "Building reel for Reels row $ROW_INDEX (no topic given)"
+          else
+            echo "::error::Neither topic nor row_index provided"
             exit 1
-          }
+          fi
 
       - name: Build reel
         env:
           TOPIC: ${{ steps.target.outputs.topic }}
           ROW: ${{ steps.target.outputs.row }}
           MODE: ${{ steps.target.outputs.mode }}
-          PY: ${{ steps.venv.outputs.python }}
         run: |
-          New-Item -ItemType Directory -Force -Path logs, renders | Out-Null
-          $ErrorActionPreference = 'Continue'
-          if ($env:MODE -eq 'topic') {
-            & $env:PY publisher/tweet_card_reel.py --topic "$env:TOPIC" 2>&1 | Tee-Object -FilePath "logs/tweet_card_reel.log"
-          } else {
-            & $env:PY publisher/tweet_card_reel.py --row "$env:ROW" 2>&1 | Tee-Object -FilePath "logs/tweet_card_reel_row$($env:ROW).log"
-          }
-          # Propagate the Python exit code so a real build failure fails the step.
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::tweet_card_reel.py exited with code $LASTEXITCODE"
-            exit $LASTEXITCODE
-          }
+          set -o pipefail
+          mkdir -p logs renders
+          if [ "$MODE" = "topic" ]; then
+            python publisher/tweet_card_reel.py --topic "$TOPIC" 2>&1 | tee "logs/tweet_card_reel.log"
+          else
+            python publisher/tweet_card_reel.py --row "$ROW" 2>&1 | tee "logs/tweet_card_reel_row${ROW}.log"
+          fi
 
       - name: Upload logs
         if: always()
