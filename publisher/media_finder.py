@@ -99,7 +99,7 @@ def _col_index(headers: list[str], name: str) -> int:
     except ValueError:
         raise RuntimeError(
             f"Column {name!r} missing from sheet. "
-            f"Run scripts/setup_reels_sheet.py to add it."
+            f"Run scripts/setup/setup_reels_sheet.py to add it."
         )
 
 
@@ -123,7 +123,7 @@ def _select_pending_rows(ws) -> list[int]:
     except ValueError as exc:
         raise RuntimeError(
             f"Sheet missing required column: {exc}. "
-            f"Run scripts/setup_reels_sheet.py first."
+            f"Run scripts/setup/setup_reels_sheet.py first."
         )
 
     pending: list[int] = []

@@ -100,6 +100,39 @@ def _candidate_video_urls(row: dict) -> list[str]:
     return urls
 
 
+def _pick_window_for_url(url: str, topic: str, row: dict):
+    """Choose a clean (start, end) clip window from `url`'s transcript BEFORE
+    downloading, so the download fetches exactly the payoff window (which may
+    sit deep inside a long video) rather than the first 60s.
+
+    Returns (start, end) in seconds, or None when the video has no usable
+    captions / the topic never appears / anything fails — in which case the
+    caller does the old head-only download. Never raises.
+    """
+    try:
+        from publisher.media_sources.clip_window import choose_clip_window
+        window = choose_clip_window(
+            topic,
+            video_url=url,
+            context=(row.get("Key Points") or ""),
+            max_clip=58.0,
+        )
+    except Exception as exc:  # noqa: BLE001 — windowing is best-effort
+        log.info("Window pre-pick failed for %s (%s) — head download.", url, exc)
+        return None
+
+    reason = (window.get("detail") or {}).get("reason", "")
+    # "no transcript; from start" => there were no captions to reason over.
+    # Keep the old head-download path so we don't pay to fetch a full long
+    # video just to take its first 58s.
+    if window["start"] == 0.0 and "no transcript" in reason:
+        log.info("No captions for %s — head download (first ~60s).", url)
+        return None
+    log.info("Pre-picked window %.1f-%.1fs (%.1fs) — %s",
+             window["start"], window["end"], window["duration"], reason)
+    return (float(window["start"]), float(window["end"]))
+
+
 def _sheets_config() -> dict:
     load_dotenv(REPO_ROOT / ".env")
     sheet_id = os.getenv("GOOGLE_SHEET_ID")
@@ -376,13 +409,24 @@ def build_reel_for_row(row: dict) -> Path:
     candidates = _candidate_video_urls(row)
     source_video = None
     used_url = ""
+    clip_offset = 0.0   # seconds the downloaded file is shifted into the source
+    win_len = None      # length of the pre-picked window (None => head download)
     errors: list[str] = []
     for i, cand in enumerate(candidates, start=1):
         label = "primary" if i == 1 else f"backup {i - 1}"
         log.info("Downloading source video (%s of %d, %s): %s",
                  i, len(candidates), label, cand)
+        # Choose the clean clip WINDOW from this candidate's transcript BEFORE
+        # downloading, so we fetch exactly the window (which may sit deep inside
+        # a long video) instead of the first 60s. Falls back to head-download
+        # when the video has no captions. Never fails the loop.
+        cand_window = _pick_window_for_url(cand, topic, row)
         try:
-            got = fetch_single_clip(cand, slug, max_seconds=60.0)
+            if cand_window is not None:
+                got = fetch_single_clip(cand, slug, max_seconds=60.0,
+                                        window=cand_window)
+            else:
+                got = fetch_single_clip(cand, slug, max_seconds=60.0)
         except Exception as exc:  # noqa: BLE001 — try the next candidate
             log.warning("  %s failed: %s", label, exc)
             errors.append(f"{label}: {exc}")
@@ -390,6 +434,11 @@ def build_reel_for_row(row: dict) -> Path:
         if got and Path(got).exists() and Path(got).stat().st_size > 0:
             source_video = got
             used_url = cand
+            # If we windowed the download, the file now starts at window[0];
+            # the composite must play it from 0 for (end-start) seconds.
+            clip_offset = cand_window[0] if cand_window is not None else 0.0
+            win_len = ((cand_window[1] - cand_window[0])
+                       if cand_window is not None else None)
             if i > 1:
                 log.info("Recovered using %s (%s) after primary failed.",
                          label, cand)
@@ -445,28 +494,32 @@ def build_reel_for_row(row: dict) -> Path:
         out_path=card_png,
     )
 
-    # Pick a CLEAN clip window so the reel ends on a completed sentence /
-    # speech pause / stable frame near the topic payoff — not a random cut at
-    # the 60s mark. Free + deterministic (transcript timestamps + one ffmpeg
-    # scene-detect pass). Degrades to (0, cap) when the video has no captions.
+    # The clip WINDOW was already chosen from the transcript (see
+    # _pick_window_for_url) and the download fetched exactly that window, so the
+    # source file now STARTS at the window. Play it from 0 for the window's
+    # length. If windowing didn't apply (no captions), clip_end stays None =>
+    # old "from the start, capped" behavior. Optionally snap the ending to a
+    # visual scene cut now that we have the pixels on disk.
     clip_start, clip_end = 0.0, None
-    try:
-        from publisher.media_sources.clip_window import choose_clip_window
-        from publisher.media_consumer import _resolve_ffmpeg
-        window = choose_clip_window(
-            topic,
-            video_url=video_url,
-            video_path=Path(source_video),
-            context=(row.get("Key Points") or ""),
-            ffmpeg=_resolve_ffmpeg(),
-            max_clip=58.0,
-        )
-        clip_start, clip_end = window["start"], window["end"]
-        log.info("Clip window: %.1f-%.1fs (%.1fs, scene-snapped=%s) — %s",
-                 window["start"], window["end"], window["duration"],
-                 window["snapped_to_scene"], window["detail"].get("reason"))
-    except Exception as exc:  # noqa: BLE001 — never fail the build on windowing
-        log.warning("Clip-window selection failed (%s) — using full clip.", exc)
+    if win_len is not None:
+        clip_end = round(win_len, 2)
+        # Scene-snap the ending against the downloaded window (relative coords).
+        try:
+            from publisher.media_sources.clip_window import (
+                detect_scene_cuts, snap_end_to_scene,
+            )
+            from publisher.media_consumer import _resolve_ffmpeg
+            cuts = detect_scene_cuts(Path(source_video),
+                                     ffmpeg=_resolve_ffmpeg())
+            snapped = snap_end_to_scene(clip_end, cuts, start=0.0)
+            if abs(snapped - clip_end) > 0.05:
+                log.info("Scene-snapped ending %.1f -> %.1fs.",
+                         clip_end, snapped)
+                clip_end = snapped
+        except Exception as exc:  # noqa: BLE001 — snapping is best-effort
+            log.info("Scene snap skipped (%s).", exc)
+        log.info("Clip window: source[%.1f-%.1f] played as [0-%.1f] (%.1fs).",
+                 clip_offset, clip_offset + clip_end, clip_end, clip_end)
 
     out_mp4 = RENDERS_DIR / f"{slug}-tweet.mp4"
     log.info("Compositing reel (video) -> %s", out_mp4.name)

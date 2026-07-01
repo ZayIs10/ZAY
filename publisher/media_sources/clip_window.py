@@ -55,12 +55,23 @@ except Exception:  # noqa: BLE001
 
 # --- tunables --------------------------------------------------------------
 MIN_CLIP = 10.0        # never ship a clip shorter than this
+TARGET_CLIP = 30.0     # sweet-spot length — once past this, the first strong
+                       # ending wins (don't stretch to the cap for its own sake)
 MAX_CLIP = 58.0        # under the 60s IG Reels ceiling, leaves compositor room
 LEAD_IN = 1.2          # start this many seconds before the payoff sentence...
 LEAD_IN_MAX_BACK = 4.0 # ...but never rewind more than this to a sentence start
 PAUSE_GAP = 0.45       # a gap >= this between cues counts as a speech pause
 SCENE_SNAP_WINDOW = 2.5  # only snap the end to a scene cut within this window
 SENTENCE_END_RE = re.compile(r"[.!?]['\")\]]?\s*$")
+# Function/filler words that make a BAD cut point — a clip ending on "and",
+# "the", "that's", "to"... feels chopped. Used only in the last-resort fallback
+# when there's no punctuation and no speech-gap to cut on (gapless captions).
+_DANGLING_END_RE = re.compile(
+    r"\b(a|an|the|and|or|but|so|to|of|in|on|at|for|with|is|are|was|were|"
+    r"that|that's|this|these|those|it's|i|we|you|they|he|she|my|your|our|"
+    r"as|if|because|when|while|which|who|what|how|uh|um|like|really)\s*$",
+    re.IGNORECASE,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -140,28 +151,87 @@ def choose_window_from_cues(
     # A touch of lead-in so we don't start on the very first phoneme.
     start = max(0.0, start - 0.0)  # sentence start already gives run-up
 
-    # --- END: first clean sentence+pause boundary at/after the payoff --------
-    end = None
+    # --- END: cleanest boundary at/after the payoff -------------------------
+    # Real YouTube auto-captions almost NEVER carry sentence punctuation (they
+    # are rolling captions — periods appear <1% of the time). So we can't rely
+    # on `.!?` alone. We rank candidate endings by how clean they are and take
+    # the best one inside [min_clip, max_clip]:
+    #   3 = sentence punctuation AND a following speech pause  (ideal)
+    #   2 = sentence punctuation only
+    #   1 = a clear speech pause only  (a real gap = a natural thought break —
+    #       this is what carries auto-captioned videos)
+    # Among same-quality endings, prefer the LONGEST clip in range (lets a
+    # thought complete) rather than the first one just past min_clip.
+    def _end_quality(i: int) -> int:
+        sent = _is_sentence_end(cues[i]["text"])
+        pause = _pause_after(cues, i)
+        if sent and pause:
+            return 3
+        if sent:
+            return 2
+        if pause:
+            return 1
+        return 0
+
+    def _pause_size(i: int) -> float:
+        if i + 1 >= len(cues):
+            return 99.0  # end of transcript = the biggest pause of all
+        return max(0.0, cues[i + 1]["start"] - cues[i]["end"])
+
+    # Score every in-range cue and keep the best ending. Preference order:
+    #   1. higher quality (sentence+pause > sentence > pause)
+    #   2. once we've passed TARGET_CLIP, a bigger pause = a cleaner breath
+    #   3. reaching at least the target length (so we don't cut a 12s clip when
+    #      a clean 30s one exists just ahead)
+    best_i, best_key = None, None
     for i in range(p, len(cues)):
         elapsed = cues[i]["end"] - start
         if elapsed < min_clip:
             continue  # too short — keep going to reach a satisfying length
         if elapsed > max_clip:
             break
-        if _is_sentence_end(cues[i]["text"]) and _pause_after(cues, i):
-            end = cues[i]["end"]
-            break
+        q = _end_quality(i)
+        if q < 1:
+            continue  # not a boundary at all — never end here
+        reached_target = elapsed >= min(TARGET_CLIP, max_clip)
+        # Sort key (higher is better): prefer quality, then having reached the
+        # sweet-spot length, then a longer/cleaner pause.
+        key = (q, 1 if reached_target else 0, round(_pause_size(i), 2), elapsed)
+        if best_key is None or key > best_key:
+            best_i, best_key = i, key
 
-    if end is None:
-        # No clean boundary in range: take the last sentence-end before max_clip,
-        # else hard-cap at max_clip.
-        fallback = None
+    if best_i is not None:
+        end = cues[best_i]["end"]
+        reason = {3: "sentence+pause", 2: "sentence end",
+                  1: "speech pause"}[_end_quality(best_i)]
+    else:
+        # Nothing clean in range (dense, gapless speech — common when auto-
+        # caption timings are interpolated, so there are no real gaps and no
+        # punctuation). Don't stretch to the 58s cap for nothing: land near the
+        # TARGET length, on the cue that best completes a phrase (ends on a
+        # content word, not a dangling "and / that's / the / to"). We still cut
+        # BETWEEN cues, never inside a caption line.
+        target_end = start + min(TARGET_CLIP, max_clip)
+        candidates = []
         for i in range(p, len(cues)):
-            if cues[i]["end"] - start > max_clip:
+            e_i = cues[i]["end"]
+            if e_i - start < min_clip:
+                continue
+            if e_i - start > max_clip:
                 break
-            if _is_sentence_end(cues[i]["text"]):
-                fallback = cues[i]["end"]
-        end = fallback if fallback else min(start + max_clip, cues[-1]["end"])
+            # distance from the sweet spot, and whether it dangles on a
+            # function word (bad place to cut).
+            dangling = bool(_DANGLING_END_RE.search(cues[i]["text"]))
+            candidates.append((abs(e_i - target_end), dangling, e_i))
+        if candidates:
+            # prefer non-dangling, then closest to target length
+            candidates.sort(key=lambda c: (c[1], c[0]))
+            end = candidates[0][2]
+            reason = ("phrase boundary near target"
+                      if not candidates[0][1] else "cue boundary near target")
+        else:
+            end = min(start + max_clip, cues[-1]["end"])
+            reason = "hard cap (no boundary in range)"
 
     # Guarantee minimum length even if the payoff sits near the end.
     if end - start < min_clip:
@@ -172,7 +242,8 @@ def choose_window_from_cues(
         "payoff_start": round(payoff_start, 2),
         "payoff_text": cues[p]["text"][:80],
         "start_cue": start_i,
-        "reason": "transcript sentence+pause boundary",
+        "end_quality": _end_quality(best_i) if best_i is not None else 0,
+        "reason": reason,
     }
     return round(start, 2), round(end, 2), detail
 

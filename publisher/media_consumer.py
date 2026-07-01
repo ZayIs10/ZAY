@@ -128,7 +128,8 @@ _YT_CLIENTS_COOKIELESS = ("tv", "ios", "android", "web_safari")
 _YT_CLIENTS_WITH_COOKIES = ("web", "tv", "ios")
 
 
-def _ytdlp_base_opts(dest: Path, section_seconds: float | None = None) -> dict:
+def _ytdlp_base_opts(dest: Path, section_seconds: float | None = None,
+                     section_range: tuple[float, float] | None = None) -> dict:
     """Shared yt-dlp options for every client attempt.
 
     `section_seconds`: if set, download ONLY the first N seconds of the video
@@ -161,7 +162,18 @@ def _ytdlp_base_opts(dest: Path, section_seconds: float | None = None) -> dict:
         # Without this, only storyboard images are offered.
         "remote_components": ["ejs:github"],
     }
-    if section_seconds and section_seconds > 0:
+    if section_range is not None:
+        # Download ONLY [start, end] — used when the smart clip-window picked a
+        # window deep inside a long video (e.g. the payoff at 50 min). Without
+        # this the head-only download would never contain the chosen window and
+        # the reel would render an empty/clamped clip. download_range_func lives
+        # in yt_dlp.utils; import lazily so this module loads without yt-dlp.
+        from yt_dlp.utils import download_range_func  # type: ignore
+        r0, r1 = float(section_range[0]), float(section_range[1])
+        opts["download_ranges"] = download_range_func(None, [(max(0.0, r0), r1)])
+        # Ranges land on keyframes; force-keyframes keeps the cut near-exact.
+        opts["force_keyframes_at_cuts"] = True
+    elif section_seconds and section_seconds > 0:
         # Download only [0, section_seconds]. download_range_func lives in
         # yt_dlp.utils; import lazily so this module still loads without yt-dlp.
         from yt_dlp.utils import download_range_func  # type: ignore
@@ -199,7 +211,8 @@ def _is_bot_block(exc: Exception) -> bool:
 
 
 def _ytdlp_download(url: str, dest: Path,
-                    section_seconds: float | None = None) -> None:
+                    section_seconds: float | None = None,
+                    section_range: tuple[float, float] | None = None) -> None:
     """Download the best portrait-leaning MP4 via yt-dlp, trying multiple
     YouTube player clients so we don't depend on (rot-prone) login cookies.
 
@@ -251,7 +264,8 @@ def _ytdlp_download(url: str, dest: Path,
 
     last_exc: Exception | None = None
     for client, use_cookies in attempts:
-        opts = _ytdlp_base_opts(dest, section_seconds=section_seconds)
+        opts = _ytdlp_base_opts(dest, section_seconds=section_seconds,
+                                section_range=section_range)
         opts["extractor_args"] = {"youtube": {"player_client": [client]}}
         if use_cookies and cookiefile:
             opts["cookiefile"] = cookiefile
@@ -344,10 +358,17 @@ def fetch_video(url: str, slug: str, durations: list[float]) -> list[str]:
     return rels
 
 
-def fetch_single_clip(url: str, slug: str, *, max_seconds: float = 60.0) -> Path:
+def fetch_single_clip(url: str, slug: str, *, max_seconds: float = 60.0,
+                      window: tuple[float, float] | None = None) -> Path:
     """Download `url` once, return ONE mp4 path. Used by the tweet-card
     reel pipeline (the static caption + variable-length source video
     format) where downstream wants the whole clip, not per-beat splits.
+
+    `window` (start, end): when the smart clip-window chose a segment DEEP in a
+    long video (e.g. the payoff at 50 min), download exactly that window instead
+    of the head. The returned file then starts at `start`, so the caller must
+    composite with clip_start=0 relative to it. When `window` is None we keep
+    the old head-only download of the first `max_seconds`.
 
     The clip is NOT re-encoded here — duration capping and scale/crop
     happen later in `publisher/compositor.py` so the source bytes stay
@@ -358,10 +379,16 @@ def fetch_single_clip(url: str, slug: str, *, max_seconds: float = 60.0) -> Path
 
     if _is_youtube(url):
         log.info("Downloading YouTube clip via yt-dlp: %s", url)
-        # The reel uses at most `max_seconds` from the START of the clip (the
-        # compositor trims to that), so only download that opening section — a
-        # 10-min source no longer pulls 10 min of data. +2s is a safety buffer.
-        _ytdlp_download(url, raw, section_seconds=max_seconds + 2.0)
+        if window is not None:
+            w0, w1 = float(window[0]), float(window[1])
+            # +2s tail buffer so keyframe rounding never clips the ending.
+            log.info("Windowed download: %.1f-%.1fs", w0, w1)
+            _ytdlp_download(url, raw, section_range=(w0, w1 + 2.0))
+        else:
+            # The reel uses at most `max_seconds` from the START of the clip
+            # (the compositor trims to that), so only download that opening
+            # section — a 10-min source no longer pulls 10 min of data.
+            _ytdlp_download(url, raw, section_seconds=max_seconds + 2.0)
     else:
         log.info("Downloading direct video: %s", url)
         _http_download(url, raw)

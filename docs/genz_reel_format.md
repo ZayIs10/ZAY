@@ -231,28 +231,37 @@ a completed thought.
 **Module:** [publisher/media_sources/clip_window.py](../publisher/media_sources/clip_window.py)
 — free + deterministic (no LLM, no paid API).
 
-Four signals, all from data we already fetch:
+Endings are RANKED (best first) — real YouTube auto-captions carry sentence
+punctuation <1% of the time and often have zero inter-cue gaps, so we can't
+rely on `.!?` alone:
 1. **Topic payoff** — the transcript cue where the topic keywords / version
-   number land densest is the moment the clip must contain.
-2. **Sentence / thought boundary** — end at the end of the sentence that
-   carries (or immediately follows) the payoff; never mid-word.
-3. **Natural pause** — snap the cut to a gap (≥0.45s) between caption cues, so
-   the ending feels intentional.
-4. **Stable frame** — nudge the end to the nearest ffmpeg scene-cut so we don't
-   freeze on a transition frame (one light `select='gt(scene,0.4)'` pass).
+   number land densest is the moment the clip must contain (the anchor).
+2. **sentence + pause** (best) — sentence punctuation followed by a speech gap.
+3. **sentence** — punctuation alone.
+4. **speech pause** — a gap (≥0.45s) between cues = a natural thought break;
+   this is what carries most auto-captioned videos.
+5. **phrase boundary near target** (last resort, for gapless/unpunctuated
+   captions) — land near `TARGET_CLIP` (30s) on a cue that ends on a content
+   word, never on a dangling "and / the / that's / to". Never a hard mid-word
+   cut at the 58s cap.
+Plus **stable frame** — the ending is nudged to the nearest ffmpeg scene-cut so
+we don't freeze on a transition frame (one light `select='gt(scene,0.4)'` pass).
 
 Length is **not** fixed: it starts at the best moment and runs until the next
-clean boundary, within `[MIN_CLIP 10s, MAX_CLIP 58s]`.
+clean boundary, within `[MIN_CLIP 10s, MAX_CLIP 58s]`, favouring ~30s.
 
 **Timing source:** `transcript_picker.fetch_transcript_cues()` returns the VTT
 as timed cues `[{start, end, text}]` (the same free yt-dlp auto-caption fetch
 used to pick the video by transcript in §research).
 
-**Wiring:** `tweet_card_reel.build_reel_for_row` calls `choose_clip_window()`
-after download, then passes `clip_start`/`clip_end` to `compositor.build()`,
-which seeks the source with `-ss <start>` (video+audio in sync) and plays the
-window.
+**Wiring (download-the-window, not the head):** `tweet_card_reel` picks the
+window from the transcript **before** downloading (`_pick_window_for_url`), then
+`fetch_single_clip(url, window=(start,end))` downloads **only** that window via
+yt-dlp `download_ranges` — so a payoff at 50 min is actually fetched (the old
+code head-downloaded the first 60s and never contained a deep window). The
+downloaded file starts at `start`; `compositor.build()` plays it from 0 for the
+window length. The ending is scene-snapped once the pixels are on disk.
 
-**Degrades safely:** a video with no captions → `(0, cap)` "from the start"
-(old behavior); any error in windowing → full clip. The build never fails on
-clip-window selection.
+**Degrades safely:** no captions → head-download the first ~60s "from the
+start" (old behavior); any error in windowing → full clip. The build never
+fails on clip-window selection.
