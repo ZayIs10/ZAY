@@ -37,6 +37,10 @@ jobs:
       GOOGLE_SHEET_REELS_NAME: Reels
       YOUTUBE_COOKIES_FILE: youtube_cookies.txt
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      # Residential proxy (DataImpulse) — the load-bearing secret that lets this
+      # CLOUD runner download YouTube clips despite datacenter IPs being
+      # bot-blocked. media_consumer routes yt-dlp through it. Laptop can stay OFF.
+      PROXY_URL: ${{ secrets.PROXY_URL }}
       # Instagram staging (upload + process the reel; the user taps Publish).
       # If unset the build still succeeds — it skips IG staging and the review
       # email tells the user to post from the Drive link instead.
@@ -82,6 +86,8 @@ jobs:
           printf "GOOGLE_SHEET_ID=%s\n" "$GOOGLE_SHEET_ID" >> .env
           printf "GOOGLE_SHEET_REELS_NAME=%s\n" "$GOOGLE_SHEET_REELS_NAME" >> .env
           printf "YOUTUBE_API_KEY=%s\n" "$YOUTUBE_API_KEY" >> .env
+          [ -n "$PROXY_URL" ] && printf "PROXY_URL=%s\n" "$PROXY_URL" >> .env
+          true
 
       - name: Write Google service account
         run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > google_service_account.json
