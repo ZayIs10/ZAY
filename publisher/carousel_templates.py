@@ -552,28 +552,41 @@ DRAFTING_STATUS = "Drafting"      # claim word: distinct from build's "Building"
 
 
 def _carousel_rows():
-    """(reader, [row dicts]) for the carousel Sheet — reuses the review
-    module's reader so there is ONE Sheet-access path, not two."""
-    from publisher.carousel_review import _carousel_sheet_reader
-    reader = _carousel_sheet_reader()
-    values = reader.ws.get_all_values()
-    if not values:
-        return reader, []
-    headers = values[0]
+    """[row dicts] across ALL carousel tabs — reuses the review module's
+    readers so there is ONE Sheet-access path. Each row is tagged with the tab
+    it came from (`_tab`) and that tab's implied build format (`_tab_format`),
+    so a topic needs no per-row Format column: the tab decides. Kept as
+    (reader, rows) for back-compat; `reader` is the first tab's handle."""
+    from publisher.carousel_review import _carousel_readers
+    first_reader = None
     rows = []
-    for i, raw in enumerate(values[1:], start=2):
-        row = {headers[j]: (raw[j] if j < len(raw) else "")
-               for j in range(len(headers))}
-        row["_row_index"] = i
-        rows.append(row)
-    return reader, rows
+    for tab, fmt, reader in _carousel_readers():
+        if first_reader is None:
+            first_reader = reader
+        values = reader.ws.get_all_values()
+        if not values:
+            continue
+        headers = values[0]
+        for i, raw in enumerate(values[1:], start=2):
+            row = {headers[j]: (raw[j] if j < len(raw) else "")
+                   for j in range(len(headers))}
+            row["_row_index"] = i
+            row["_tab"] = tab
+            row["_tab_format"] = fmt
+            rows.append(row)
+    return first_reader, rows
 
 
 def _is_carousel_row(row: dict) -> bool:
-    """Carousels share the Reels tab; a 'Post Type' == 'carousel' marks them
-    (the existing project convention — see batch_generate / post_generator).
-    Rows with no Post Type are treated as carousels ONLY on a dedicated tab;
-    on the shared tab a blank Post Type is ambiguous, so we require the tag."""
+    """Every row on a dedicated carousel tab (Carousel Tutorial / Carousel Wild)
+    IS a carousel — the tab, not a Post Type cell, marks it. A row that carries
+    an explicit non-carousel Post Type is still rejected, but a BLANK Post Type
+    on a carousel tab now counts (topics were split into these tabs by format,
+    2026-07-01). Rows coming from a tab we don't recognise fall back to the old
+    rule (require Post Type == 'carousel')."""
+    if row.get("_tab"):  # came from a known carousel tab
+        pt = str(row.get("Post Type", "")).strip().lower()
+        return pt in ("", "carousel")
     return str(row.get("Post Type", "")).strip().lower() == "carousel"
 
 
@@ -610,11 +623,19 @@ def draft_from_sheet(*, dry_run: bool = False,
     topic = str(row.get("Topic", "")).strip()
     key_points = str(row.get("Key Points", "") or row.get("Key Points / Notes",
                                                           "")).strip()
-    # Format: honour an explicit "Format" column if present + valid, else the
-    # free classifier (which defaults to tutorial = our locked launch format).
+    # Format resolution order (2026-07-01 two-tab split):
+    #   1. an explicit, valid "Format" column on the row always wins;
+    #   2. else the TAB the row sits in decides (Carousel Tutorial -> tutorial,
+    #      Carousel Wild -> ai_in_the_wild);
+    #   3. else fall back to the free keyword classifier.
     col_fmt = str(row.get("Format", "")).strip().lower()
-    fmt = col_fmt if col_fmt in VALID_FORMATS else choose_format(topic,
-                                                                 key_points)
+    tab_fmt = str(row.get("_tab_format", "")).strip().lower()
+    if col_fmt in VALID_FORMATS:
+        fmt = col_fmt
+    elif tab_fmt in VALID_FORMATS:
+        fmt = tab_fmt
+    else:
+        fmt = choose_format(topic, key_points)
 
     out_dir = out_dir or SPECS_DIR
     out_dir.mkdir(parents=True, exist_ok=True)

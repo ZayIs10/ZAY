@@ -145,19 +145,55 @@ def send_review_email(*, topic: str, caption: str, folder_url: str,
 # ---------------------------------------------------------------------------
 # 3) Sheet status — address the row by TOPIC (row numbers drift on re-sort)
 # ---------------------------------------------------------------------------
-def _carousel_sheet_reader():
+# The carousel topics live in TWO format-specific tabs (user split, 2026-07-01):
+# each tab IMPLIES its build format, so a row needs no "Format" column — the tab
+# it sits in decides. CAROUSEL_TABS maps tab title -> format. A row's own
+# "Format" column still overrides if present. Env vars let you rename the tabs
+# without touching code. The legacy single "Carousel" tab is kept as a fallback
+# so nothing breaks if a topic is left there.
+CAROUSEL_TABS = {
+    os.getenv("GOOGLE_SHEET_CAROUSEL_TUTORIAL_TAB", "Carousel Tutorial"):
+        "tutorial",
+    os.getenv("GOOGLE_SHEET_CAROUSEL_WILD_TAB", "Carousel Wild"):
+        "ai_in_the_wild",
+}
+
+
+def _carousel_sheet_reader(tab: str | None = None):
+    """A SheetsReader bound to one carousel tab. Defaults to the first
+    format tab (Carousel Tutorial) for callers that just need any handle;
+    pass `tab` to target a specific one."""
     from publisher.post_generator import SheetsReader  # lazy: needs gspread
     load_dotenv(REPO_ROOT / ".env")
     sheet_id = os.getenv("GOOGLE_SHEET_ID")
     if not sheet_id:
         raise RuntimeError("GOOGLE_SHEET_ID is not set in .env")
+    # Back-compat: GOOGLE_SHEET_CAROUSELS_NAME (old single-tab var) still works.
+    default_tab = (tab or next(iter(CAROUSEL_TABS))
+                   or os.getenv("GOOGLE_SHEET_CAROUSELS_NAME", "Sheet1"))
     return SheetsReader({
         "google_sheets": {
             "credentials_file": "google_service_account.json",
             "spreadsheet_id": sheet_id,
-            "sheet_name": os.getenv("GOOGLE_SHEET_CAROUSELS_NAME", "Sheet1"),
+            "sheet_name": default_tab,
         }
     })
+
+
+def _carousel_readers():
+    """One reader per carousel tab that actually exists in the spreadsheet.
+    Yields (tab_name, format, reader). Skips a configured tab that is missing
+    so a rename/deletion never crashes the run."""
+    seen_titles = None
+    for tab, fmt in CAROUSEL_TABS.items():
+        try:
+            reader = _carousel_sheet_reader(tab)
+        except Exception as exc:  # noqa: BLE001
+            # missing tab (WorksheetNotFound) or auth issue — skip, don't crash
+            if seen_titles is None:
+                log.warning("Carousel tab %r not opened: %s", tab, exc)
+            continue
+        yield tab, fmt, reader
 
 
 def _find_row_by_topic(reader, topic: str) -> dict | None:
@@ -187,20 +223,24 @@ def _try_update(reader, row_index: int, header: str, value: str) -> None:
 def update_sheet_status(topic: str, status: str,
                         drive_url: str = "") -> bool:
     """Set the carousel row's Status (matched by Topic) + Drive URL.
-    Returns True if the row was found and updated."""
+    Returns True if the row was found and updated. Searches EVERY carousel tab
+    (topics are split across Carousel Tutorial + Carousel Wild) and updates the
+    one that holds this topic."""
     try:
-        reader = _carousel_sheet_reader()
-        row = _find_row_by_topic(reader, topic)
-        if not row:
-            log.warning("No Sheet row with Topic == %r — skipping status.",
-                        topic)
-            return False
-        idx = row["_row_index"]
-        _try_update(reader, idx, "Status", status)
-        if drive_url:
-            _try_update(reader, idx, "Drive URL", drive_url)
-        log.info("Sheet row %d (%r): Status -> %s", idx, topic, status)
-        return True
+        for tab, _fmt, reader in _carousel_readers():
+            row = _find_row_by_topic(reader, topic)
+            if not row:
+                continue
+            idx = row["_row_index"]
+            _try_update(reader, idx, "Status", status)
+            if drive_url:
+                _try_update(reader, idx, "Drive URL", drive_url)
+            log.info("Sheet[%s] row %d (%r): Status -> %s",
+                     tab, idx, topic, status)
+            return True
+        log.warning("No carousel tab has Topic == %r — skipping status.",
+                    topic)
+        return False
     except Exception as exc:  # noqa: BLE001 — sheet failure must not fail render
         log.warning("Sheet status update failed for %r: %s", topic, exc)
         return False

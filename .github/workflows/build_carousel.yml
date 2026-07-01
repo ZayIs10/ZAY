@@ -48,9 +48,13 @@ jobs:
 
     env:
       GOOGLE_SHEET_ID:      ${{ secrets.GOOGLE_SHEET_ID }}
-      # Carousels live on their own "Carousel" tab (split out of Reels
-      # 2026-06-28). Without this the pipeline defaults to an old "Sheet1" tab.
-      GOOGLE_SHEET_CAROUSELS_NAME: Carousel
+      # Carousel topics are split into TWO format-specific tabs (2026-07-01):
+      # "Carousel Tutorial" (how-to decks) and "Carousel Wild" (AI-in-the-Wild
+      # news/use-case decks). The tab a topic sits in decides its build format,
+      # so no per-row Format column is needed. These override the code defaults;
+      # rename here if you rename the tabs.
+      GOOGLE_SHEET_CAROUSEL_TUTORIAL_TAB: Carousel Tutorial
+      GOOGLE_SHEET_CAROUSEL_WILD_TAB:     Carousel Wild
       PEXELS_API_KEY:       ${{ secrets.PEXELS_API_KEY }}
       OPENAI_API_KEY:       ${{ secrets.OPENAI_API_KEY }}
       OPENAI_IMAGE_MODEL:   gpt-image-1
@@ -85,7 +89,8 @@ jobs:
       - name: Write .env
         run: |
           printf "GOOGLE_SHEET_ID=%s\n" "$GOOGLE_SHEET_ID" >> .env
-          printf "GOOGLE_SHEET_CAROUSELS_NAME=%s\n" "$GOOGLE_SHEET_CAROUSELS_NAME" >> .env
+          printf "GOOGLE_SHEET_CAROUSEL_TUTORIAL_TAB=%s\n" "$GOOGLE_SHEET_CAROUSEL_TUTORIAL_TAB" >> .env
+          printf "GOOGLE_SHEET_CAROUSEL_WILD_TAB=%s\n" "$GOOGLE_SHEET_CAROUSEL_WILD_TAB" >> .env
           printf "PEXELS_API_KEY=%s\n"  "$PEXELS_API_KEY"  >> .env
           printf "OPENAI_API_KEY=%s\n"  "$OPENAI_API_KEY"  >> .env
           printf "OPENAI_IMAGE_MODEL=%s\n"  "$OPENAI_IMAGE_MODEL"  >> .env
