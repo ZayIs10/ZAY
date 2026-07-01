@@ -14,27 +14,44 @@ carousel should follow.
 
 ---
 
-## 0. TUTORIAL IS THE LOCKED DEFAULT — use it for EVERY carousel (user lock 2026-06-27)
+## 0. "AI IN THE WILD" IS THE LOCKED DEFAULT (user lock 2026-06-28, supersedes the 06-27 tutorial lock)
 
-The user approved a specific deck and said: *"save this format so whenever I ask
-you to create a carousel post you would use this format."* So **tutorial is the
-default for every carousel**, in code AND in how the assistant builds one:
+The user pivoted the carousel away from paid-image tutorials. The reasons:
+AI-generated images cost ~$0.50/deck with **no guarantee** of virality, and the
+user wants a **cheaper + higher-interaction** format. So the new default is
+**`ai_in_the_wild`** — a news/use-case carousel ("what people are ACTUALLY doing
+with AI") anchored by a **real embedded video slide**.
 
-- `choose_format()` returns **tutorial** for any topic that is not an
-  unmistakable numbered round-up (→ listicle) or pure breaking news with no
-  how-to angle (→ news_hybrid). A news-y topic gets *reframed as a how-to*, not
-  reported. Override only with an explicit `--format` / Sheet `Format` column.
-- **The golden reference deck** (the look the user signed off on):
-  `assets/carousels/build_an_app_with_no_code_using_claude_c/` — topic
-  *"Build an App With No Code Using Claude Code."* Slide order, hook style, neon
-  key word, numbered chips, recap, and CTA in that deck = the bar every future
-  carousel must hit. Its spec is the worked example of this whole doc.
-- **The locked slide order (never reorder, never drop recap):**
-  `cover ("outcome in X steps") → STEP 1..N (one action each) → PRO TIP →
-  recap (the SAVE engine, REQUIRED) → CTA (specific value, never bare "follow")`.
-- **Content must be TRUE.** Real steps for the real tool (the Claude-Code deck
-  was corrected from an invented click-UI to the real CLI flow before render).
-  No invented buttons, menus, stats, or quotes — this is the teach-a-skill brand.
+- **Why it's cheaper:** the video + every slide background come FREE from the
+  reels media machinery (`media_finder.discover_for_topic` → real YouTube/Pexels
+  clip + thumbnails). A deck costs ~**$0**. The ONLY possible spend is a single
+  AI cover image (~$0.08) used **only as a fallback** when no decent thumbnail is
+  found. Content/use-case slides NEVER pay to generate.
+- **Why it interacts more:** Instagram carousels allow up to 20 mixed image+video
+  slides; a video slide lifts engagement (~2.33% vs ~1.8% image-only) and can
+  push the post into the Reels feed. The video sits at **slide 2** (right after
+  the cover) for an immediate motion hook.
+- **The locked slide order:**
+  `cover (curiosity/news hook, real-thumbnail bg) → VIDEO (real embedded clip) →
+  USE CASE 1..N (one real thing people do, real-thumbnail bg) → CTA`.
+- **CTA optimises for SAVES first** (the strongest reach lever from a small
+  base): headline drives the save, with a **soft comment nudge** in a pill
+  ("Which would you try? Comment below"). Never bare "follow for more".
+- **Content must be TRUE.** Real, current use cases only — no invented features,
+  numbers, quotes, or fabricated video/channel. Attribute with "reportedly" if
+  unsure. This is still the no-fluff brand.
+- **The video + backgrounds are found automatically** (`discover_for_topic`);
+  the drafter only writes text. The clip is downloaded by
+  `media_consumer.fetch_single_clip` (yt-dlp via the residential proxy for
+  YouTube, direct for Pexels) and embedded by `carousel_format.video_slide`.
+
+**Tutorial is still available** (the 06-27 golden-reference deck
+`assets/carousels/build_an_app_with_no_code_using_claude_c/` still stands as the
+tutorial exemplar) but is NO LONGER the default — `choose_format()` returns
+`tutorial` only for an explicit how-to ("how to", "step by step", "build/make
+X"), `listicle` only for an unmistakable numbered round-up, and
+**`ai_in_the_wild` for everything else** (news, use-cases, launches, a bare tool
+name). Override any topic with `--format` / the Sheet `Format` column.
 
 This block is the contract. The slide-by-slide detail below is how to satisfy it.
 

@@ -185,6 +185,67 @@ def _download(url: str) -> bytes | None:
         return None
 
 
+def _prepare_video_slide(beat: dict, spec: dict, *, dry_run: bool,
+                         plan: list) -> None:
+    """Find + (on a real run) download the REAL clip for a video slide, setting
+    beat['video_path'] so carousel_format.video_slide can embed it.
+
+    Reuses the reels machinery end to end: discover_for_topic picks the winning
+    clip (brand-official / YouTube / Pexels), media_consumer.fetch_single_clip
+    downloads it (yt-dlp via the residential proxy for YouTube, direct for
+    Pexels). Costs no OpenAI. On dry-run it only reports the found clip.
+
+    Best-effort: if nothing downloadable is found, the renderer falls back to a
+    still cover from the slide's media_keywords — the deck still builds.
+    """
+    topic = spec.get("topic", "")
+    entry = {"slide": "video", "subject": topic}
+    try:
+        result = discover_for_topic(topic, beat.get("headline", ""))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("video-slide discovery failed for %r: %s", topic, exc)
+        result = {}
+    vid = (result.get("video") or {}).get("winner") or {}
+    # The downloadable URL: Pexels gives a direct mp4 media_url; YouTube gives a
+    # watch page_url that yt-dlp handles. Prefer media_url, else page_url.
+    url = vid.get("media_url") or vid.get("page_url") or ""
+    entry["video_source"] = vid.get("source")
+    entry["video_title"] = vid.get("title")
+    entry["video_url"] = url
+    # Carry the video's own thumbnail + link so the caption can point to it.
+    if vid.get("thumbnail"):
+        beat.setdefault("thumbnail", vid["thumbnail"])
+    if url:
+        spec.setdefault("_video_ref", {"url": url, "title": vid.get("title")})
+
+    if not url:
+        entry["action"] = "no clip found -> renderer uses still fallback"
+        log.warning("  video slide: no clip found for %r", topic)
+        plan.append(entry)
+        return
+
+    if dry_run:
+        entry["action"] = f"would download clip ({vid.get('source')})"
+        log.info("  video slide: found clip %s (%s) — dry-run, not downloading",
+                 url[:70], vid.get("source"))
+        plan.append(entry)
+        return
+
+    try:
+        from publisher.media_consumer import fetch_single_clip  # noqa: E402
+        slug = carousel_format.slugify(topic)[:40]
+        clip = fetch_single_clip(url, slug, max_seconds=30.0)
+        beat["video_path"] = str(clip)
+        entry["action"] = "downloaded"
+        entry["saved"] = str(clip)
+        log.info("  video slide: downloaded -> %s", clip)
+    except Exception as exc:  # noqa: BLE001 — never fail the whole deck on this
+        entry["action"] = f"download failed: {exc}"
+        log.warning("  video slide: download failed (%s) -> still fallback",
+                    exc)
+    plan.append(entry)
+
+
 # ---------------------------------------------------------------------------
 # Step 2 — GPT-4o vision: reference image -> house-style prompt
 # ---------------------------------------------------------------------------
@@ -386,6 +447,12 @@ def run(spec: dict, *, dry_run: bool = False, to_drive: bool = False,
         guard = UsageGuard.from_env(str(REPO_ROOT))
         guard.start_run()
 
+    # VIDEO SLIDE (ai_in_the_wild): find + download the real clip so the
+    # renderer can embed it. Free-ish (no OpenAI); reuses the reels machinery.
+    for i, b in enumerate(spec["slides"]):
+        if b.get("type") == "video":
+            _prepare_video_slide(b, spec, dry_run=dry_run, plan=plan)
+
     image_beats = [
         (i, b) for i, b in enumerate(spec["slides"])
         if b.get("type") in ("cover", "content")  # recap/cta/video skip gen
@@ -419,6 +486,37 @@ def run(spec: dict, *, dry_run: bool = False, to_drive: bool = False,
         ref = find_reference(subject, beat.get("body", ""))
         entry["reference_url"] = (ref or {}).get("media_url")
         entry["reference_source"] = (ref or {}).get("source")
+
+        # AI-IN-THE-WILD = FREE IMAGES. Use the REAL thumbnail as the slide
+        # background (renderer adds the dark+neon brand overlay), spending $0.
+        # The ONLY exception is the cover with no thumbnail found, which falls
+        # through to a single AI generation (~$0.08) so the hook still lands.
+        # For every content slide, a missing thumbnail just uses the media_zone
+        # still fallback — we never pay to generate a use-case slide.
+        is_wild = spec.get("format") == "ai_in_the_wild"
+        use_real_thumb = is_wild and ref and ref.get("media_url")
+        if is_wild and not (beat.get("type") == "cover" and not use_real_thumb):
+            # dry-run: report the plan; real: download the thumbnail to out_path
+            if dry_run:
+                entry["action"] = ("use real thumbnail (free)" if use_real_thumb
+                                   else "still fallback (free, no thumbnail)")
+                plan.append(entry)
+                continue
+            if use_real_thumb:
+                thumb = _download(ref["media_url"])
+                if thumb:
+                    out_path.write_bytes(thumb)
+                    entry["saved"] = str(out_path.relative_to(REPO_ROOT))
+                    entry["action"] = "real thumbnail (free)"
+                    log.info("  [slide %d] real thumbnail -> %s", idx + 1,
+                             entry["saved"])
+                    plan.append(entry)
+                    continue
+            # no thumbnail for a content slide -> let the renderer use its
+            # media_zone still fallback (no file written, still $0).
+            entry["action"] = "still fallback (free, no thumbnail)"
+            plan.append(entry)
+            continue
 
         if dry_run:
             entry["action"] = ("vision->prompt->generate" if ref

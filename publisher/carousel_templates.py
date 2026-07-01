@@ -67,6 +67,59 @@ SPECS_DIR = REPO_ROOT / "assets" / "carousels"
 # follows; "n" expands STEP/ITEM slides to however many the content needs
 # (within min..max).
 FORMATS: dict[str, dict] = {
+    "ai_in_the_wild": {
+        # NEW DEFAULT — locked 2026-06-28. The user pivoted the carousel away
+        # from paid-image tutorials toward a cheaper, higher-interaction
+        # news/use-case format: "what people are ACTUALLY doing with AI",
+        # anchored by a REAL embedded video slide (Instagram carousels allow up
+        # to 20 mixed image+video slides; a video slide lifts engagement ~2.33%
+        # vs ~1.8% image-only and can push the post into the Reels feed). The
+        # video + slide backgrounds come FREE from the reels media machinery
+        # (discover_for_topic -> real YouTube/Pexels clip + thumbnails), so a
+        # deck costs ~$0 (an AI cover image is a FALLBACK only, ~$0.08, used
+        # solely when no decent thumbnail exists). CTA optimises for SAVES
+        # first (the strongest reach lever from a small base), with a soft
+        # comment nudge second.
+        "label": "AI in the Wild (news/use-case + video)",
+        "goal": ("Show what people are ACTUALLY doing with a specific AI tool "
+                 "right now — real, current, credible use cases, not a how-to. "
+                 "Anchor it with ONE real embedded video slide of the thing in "
+                 "action. The reader should think 'I didn't know it could do "
+                 "that' and SAVE it to try later."),
+        "slide_plan": [
+            {"type": "cover", "kicker": "AI IN THE WILD",
+             "note": "CURIOSITY/NEWS hook about real usage, not a spectacle "
+                     "claim. e.g. 'What people are really doing with <tool>' or "
+                     "'<N> wild ways people use <tool>'. Names the TOOL. counter "
+                     "chip = the count of use cases, or 'THIS WEEK'. Cover bg is "
+                     "a REAL thumbnail when one is found (AI image only as a "
+                     "fallback)."},
+            {"type": "video", "kicker": "SEE IT",
+             "note": "The REAL embedded video slide (MP4), placed right after "
+                     "the cover for an immediate motion hook. The clip is found "
+                     "free by discover_for_topic (YouTube/Pexels/brand-official) "
+                     "— the pipeline fills video_path; the drafter only writes a "
+                     "short headline + neon_word. Do NOT invent a video."},
+            {"type": "content", "kicker": "USE CASE {n}", "n": (3, 4),
+             "note": "ONE real, specific thing people do with the tool per "
+                     "slide — what they do + why it matters, one line. Real "
+                     "thumbnail/screenshot background. If it states a fact/stat, "
+                     "add a 'source' tag; otherwise leave source ''."},
+            {"type": "cta",
+             "note": "SAVE-FIRST CTA (locked): the headline drives the SAVE "
+                     "('Save this — you'll want to try #N'), with a SOFT comment "
+                     "nudge in a pill ('Which would you try? Comment below'). "
+                     "NEVER bare 'follow for more'. No link CTA until Phase 2 "
+                     "(the video link goes in the caption instead)."},
+        ],
+        "rules": ("Every use case must be a REAL, current thing people do with "
+                  "the named tool — no invented features, numbers, or quotes "
+                  "(attribute with 'reportedly' if unsure). This is news/"
+                  "use-case, NOT a step-by-step how-to: describe WHAT people do, "
+                  "not teach HOW. Keep it credible and specific. The video slide "
+                  "is real footage found automatically — never fabricate a clip "
+                  "or a channel. CTA optimises for SAVES, comment nudge second."),
+    },
     "tutorial": {
         # LAUNCH FORMAT — locked 2026-06-19. The flagship first carousel type.
         # Full rationale + decisions: brainstorms/evolving-ai-essentials-to-copy.md
@@ -187,27 +240,26 @@ _NEWS_PAT = re.compile(
 def choose_format(topic: str, key_points: str = "") -> str:
     """Pick the carousel format for a topic. Free, deterministic, no GPT.
 
-    TUTORIAL IS THE LOCKED DEFAULT (user lock, 2026-06-27): the user wants the
-    teaches-a-skill, "outcome in X steps" tutorial format on EVERY carousel
-    unless a topic EXPLICITLY asks for another format. So tutorial wins for any
-    topic that isn't an unmistakable listicle or pure news:
-      - listicle ONLY when the topic is unmistakably a numbered round-up
-        (e.g. "5 AI tools", "top 7 ...") — _LISTICLE_PAT;
-      - news_hybrid ONLY when the topic is clearly breaking news AND carries no
-        how-to signal at all (so a "how to use X's new feature" stays tutorial);
-      - everything else -> tutorial.
-    To force a format regardless of the topic, pass --format on the CLI or set
-    the Sheet's Format column (draft_from_sheet honours an explicit Format).
-    """
+    AI_IN_THE_WILD IS THE LOCKED DEFAULT (user lock, 2026-06-28): the user
+    pivoted carousels away from paid-image tutorials toward the cheaper,
+    higher-interaction news/use-case format with a real embedded video slide.
+    So ai_in_the_wild wins for any topic that isn't an EXPLICIT request for
+    another format:
+      - listicle ONLY when it is unmistakably a numbered round-up ("5 AI
+        tools", "top 7 ...") — _LISTICLE_PAT;
+      - tutorial ONLY when the topic is clearly a how-to ("how to", "step by
+        step", "guide", "build/make X") — _TUTORIAL_PAT;
+      - everything else (news, use-cases, "what people do with X", a bare tool
+        name, a launch) -> ai_in_the_wild.
+    An explicit how-to still beats the default, so genuine tutorials keep
+    working. To force a format regardless of the topic, pass --format on the
+    CLI or set the Sheet's Format column (draft_from_sheet honours it)."""
     text = f"{topic} {key_points}"
     if _LISTICLE_PAT.search(text):
         return "listicle"
-    # Pure breaking-news ONLY when there is no how-to/skill phrasing — a topic
-    # like "How to use Claude's new feature" keeps tutorial even though it has a
-    # news verb. Tutorial is the default for literally everything else.
-    if _NEWS_PAT.search(text) and not _TUTORIAL_PAT.search(text):
-        return "news_hybrid"
-    return "tutorial"
+    if _TUTORIAL_PAT.search(text):
+        return "tutorial"
+    return "ai_in_the_wild"
 
 
 # ---------------------------------------------------------------------------
@@ -262,10 +314,27 @@ def skeleton_spec(topic: str, fmt: str | None = None) -> dict:
                 # The drafter fills it (e.g. "OpenAI") or drops it for pure
                 # how-to action steps. Rendered small in the slide corner.
                 s["source"] = ""
+        elif e["type"] == "video":
+            # A REAL embedded video slide (ai_in_the_wild). The drafter writes
+            # only a short overlay headline + neon_word; the pipeline fills
+            # video_path from discover_for_topic (the reels media machinery).
+            # No body / ref_query — the clip IS the content.
+            s["headline"] = "TODO"
+            s["neon_word"] = "TODO"
+            s["media_keywords"] = [f"{slug}_{i}", "TODO-visual-word"]
         elif e["type"] == "recap":
             s["headline"] = "What you just learned"
             s["neon_word"] = "learned"
             s["points"] = ["TODO", "TODO", "TODO"]
+        elif e["type"] == "cta" and fmt == "ai_in_the_wild":
+            # SAVE-FIRST CTA (locked for ai_in_the_wild): the headline drives
+            # the SAVE (the strongest reach lever from a small base); a soft
+            # comment nudge lives in a pill. Never bare "follow for more".
+            s["headline"] = "Save this — you'll want it later"
+            s["neon_word"] = "Save"
+            s["pills"] = ["WHICH WOULD YOU TRY? COMMENT BELOW",
+                          "REAL AI USE CASES, EVERY WEEK",
+                          "NO FLUFF. NO HYPE."]
         elif e["type"] == "cta":
             # Phase-1 CTA (locked): name the SPECIFIC ongoing value of
             # following — never bare "follow for more". No link until Phase 2.
@@ -323,19 +392,34 @@ def validate_spec(spec: dict) -> list[str]:
                 problems.append(f"slide {i}: has TODO fields")
         if t == "content" and not s.get("body"):
             problems.append(f"slide {i}: content slide needs a body")
-        # CTA must NOT be bare "follow for more" (IG engagement-bait flag).
+        # A video slide needs an overlay headline (its neon_word must be in it).
+        if t == "video":
+            hl = s.get("headline", "")
+            if not hl or "TODO" in hl:
+                problems.append(f"slide {i}: video slide headline missing/TODO")
+            nw = s.get("neon_word", "")
+            if nw and nw.lower() not in hl.lower():
+                problems.append(
+                    f"slide {i}: neon_word {nw!r} not in headline")
+        # CTA must NOT be bare "follow for more" (IG engagement-bait flag). Scan
+        # the headline AND the pills so the ban can't sneak in via a pill.
         if t == "cta":
-            hl = (s.get("headline") or "").lower()
-            if re.search(r"follow\s+for\s+more|like\s+and\s+subscribe", hl):
+            blob = " ".join([str(s.get("headline") or "")]
+                            + [str(p) for p in (s.get("pills") or [])]).lower()
+            if re.search(r"follow\s+for\s+more|like\s+and\s+subscribe", blob):
                 problems.append(
                     f"slide {i}: CTA uses bare 'follow for more'/'like and "
                     f"subscribe' — name the specific value of following")
+    types = [s.get("type") for s in slides]
     # Tutorial decks REQUIRE a recap slide — it is the save engine (locked).
-    if spec.get("format") == "tutorial":
-        types = [s.get("type") for s in slides]
-        if "recap" not in types:
-            problems.append("tutorial is missing its recap slide (the save "
-                            "engine — required, never drop it)")
+    if spec.get("format") == "tutorial" and "recap" not in types:
+        problems.append("tutorial is missing its recap slide (the save "
+                        "engine — required, never drop it)")
+    # ai_in_the_wild REQUIRES its real embedded video slide (the motion hook +
+    # Reels-feed lever); without it, it is just a news carousel.
+    if spec.get("format") == "ai_in_the_wild" and "video" not in types:
+        problems.append("ai_in_the_wild is missing its video slide (the real "
+                        "embedded clip — required, it is the whole point)")
     return problems
 
 
@@ -356,10 +440,16 @@ _SCHEMA_RULES = (
     "count: ONE distinct step / tool / idea per content slide, no more, no "
     "less. If the topic naturally has 6 steps, output 6 STEP slides; if it "
     "has 3, output 3 — never pad with filler and never cram two ideas onto "
-    "one slide. Add or remove the repeating STEP/TOOL content slides to match "
-    "(stay within the {n_lo}-{n_hi} the format allows, and the whole deck "
-    "must be <= 8 slides so a caption card keeps it under Instagram's 10). "
-    "Keep the cover, recap and cta exactly once each.\n"
+    "one slide. Add or remove the repeating STEP/TOOL/USE-CASE content slides "
+    "to match (stay within the {n_lo}-{n_hi} the format allows, and the whole "
+    "deck must be <= 8 slides so a caption card keeps it under Instagram's 10). "
+    "Keep every NON-repeating slide (cover, video, recap, cta) exactly as many "
+    "times as the skeleton has it — do NOT add or drop a cover/video/recap/"
+    "cta.\n"
+    "- video slide (ai_in_the_wild only): this is a REAL embedded clip the "
+    "pipeline supplies. Write ONLY a short punchy overlay headline (<= 7 words) "
+    "+ its neon_word. NO body, NO ref_query. Never describe or invent a video; "
+    "just title it (e.g. 'Watch it actually do this').\n"
     "- headline: SENTENCE case (verified @evolving.ai style — the renderer "
     "uppercases the cover itself), <= 9 words; neon_word = ONE word that "
     "appears verbatim in that headline (the renderer paints it neon green).\n"
