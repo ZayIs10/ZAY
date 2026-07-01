@@ -105,13 +105,86 @@ def _strip_vtt(vtt_text: str) -> str:
     return " ".join(out)
 
 
-def fetch_transcript(video_url: str, *, max_chars: int = 20000) -> str:
-    """Download `video_url`'s transcript for free via yt-dlp auto-captions.
+def _vtt_ts_to_seconds(ts: str) -> float:
+    """Parse a VTT/SRT timestamp 'HH:MM:SS.mmm' (or 'MM:SS.mmm') to seconds."""
+    ts = ts.strip().replace(",", ".")
+    parts = ts.split(":")
+    try:
+        if len(parts) == 3:
+            h, m, s = parts
+            return int(h) * 3600 + int(m) * 60 + float(s)
+        if len(parts) == 2:
+            m, s = parts
+            return int(m) * 60 + float(s)
+        return float(parts[0])
+    except (ValueError, IndexError):
+        return 0.0
 
-    Returns plain text (possibly truncated to `max_chars`), or "" if the video
-    has no fetchable captions. Never raises — a failure here just means that
-    candidate can't be transcript-scored, not that the whole run breaks.
+
+_CUE_TIMING_RE = re.compile(
+    r"(\d{1,2}:\d{2}:\d{2}[.,]\d{1,3}|\d{1,2}:\d{2}[.,]\d{1,3})\s*-->\s*"
+    r"(\d{1,2}:\d{2}:\d{2}[.,]\d{1,3}|\d{1,2}:\d{2}[.,]\d{1,3})"
+)
+
+
+def parse_vtt_cues(vtt_text: str) -> list[dict]:
+    """Parse a WebVTT/SRT blob into timed cues: [{start, end, text}, ...].
+
+    Unlike _strip_vtt (which flattens to one string), this keeps the timing so
+    the clip-window picker can find WHERE the topic payoff lands and cut on a
+    real sentence/pause boundary. De-duplicates the rolling auto-caption repeats
+    by dropping a cue whose text is contained in the previous cue's text.
     """
+    cues: list[dict] = []
+    cur_start: float | None = None
+    cur_end: float | None = None
+    cur_lines: list[str] = []
+
+    def _flush() -> None:
+        nonlocal cur_start, cur_end, cur_lines
+        if cur_start is not None and cur_lines:
+            text = " ".join(cur_lines).strip()
+            if text:
+                cues.append({"start": cur_start, "end": cur_end or cur_start,
+                             "text": text})
+        cur_start, cur_end, cur_lines = None, None, []
+
+    for raw in vtt_text.splitlines():
+        line = raw.strip()
+        m = _CUE_TIMING_RE.search(line)
+        if m:
+            _flush()
+            cur_start = _vtt_ts_to_seconds(m.group(1))
+            cur_end = _vtt_ts_to_seconds(m.group(2))
+            continue
+        if not line or line == "WEBVTT" or line.startswith(("Kind:", "Language:", "NOTE")):
+            continue
+        if line.isdigit():  # SRT cue index
+            continue
+        clean = re.sub(r"<[^>]+>", "", line).strip()
+        if clean:
+            cur_lines.append(clean)
+    _flush()
+
+    # Collapse rolling-caption duplicates: auto-captions re-emit the tail of the
+    # previous cue as the head of the next. Keep only the NEW text per cue.
+    deduped: list[dict] = []
+    prev_text = ""
+    for c in cues:
+        t = c["text"]
+        if prev_text and t == prev_text:
+            continue
+        if prev_text and t.startswith(prev_text):
+            t = t[len(prev_text):].strip()
+        if t:
+            deduped.append({"start": c["start"], "end": c["end"], "text": t})
+            prev_text = c["text"]
+    return deduped or cues
+
+
+def _download_vtt(video_url: str) -> str:
+    """Download `video_url`'s raw English VTT via yt-dlp. Returns the VTT text
+    or "" on any failure (no captions / blocked / gone). Never raises."""
     try:
         from yt_dlp import YoutubeDL  # type: ignore
     except ImportError:
@@ -119,7 +192,6 @@ def fetch_transcript(video_url: str, *, max_chars: int = 20000) -> str:
         return ""
 
     with tempfile.TemporaryDirectory() as tmp:
-        outtmpl = str(Path(tmp) / "%(id)s.%(ext)s")
         ydl_opts: dict[str, Any] = {
             "quiet": True,
             "no_warnings": True,
@@ -129,6 +201,7 @@ def fetch_transcript(video_url: str, *, max_chars: int = 20000) -> str:
             "subtitleslangs": ["en", "en-US", "en-GB", "en-orig"],
             "subtitlesformat": "vtt",
             "noplaylist": True,
+            "outtmpl": str(Path(tmp) / "%(id)s.%(ext)s"),
             # Same anti-bot-block treatment the download/search paths use.
             "remote_components": ["ejs:github"],
         }
@@ -143,20 +216,40 @@ def fetch_transcript(video_url: str, *, max_chars: int = 20000) -> str:
             log.info("No transcript for %s (%s)", video_url, exc)
             return ""
 
-        # yt-dlp writes <id>.<lang>.vtt — grab the first English one it produced.
         vtts = sorted(Path(tmp).glob("*.vtt"))
         if not vtts:
             log.info("No transcript file produced for %s", video_url)
             return ""
         try:
-            raw = vtts[0].read_text(encoding="utf-8", errors="ignore")
+            return vtts[0].read_text(encoding="utf-8", errors="ignore")
         except OSError:
             return ""
 
+
+def fetch_transcript(video_url: str, *, max_chars: int = 20000) -> str:
+    """Download `video_url`'s transcript for free via yt-dlp auto-captions.
+
+    Returns plain text (possibly truncated to `max_chars`), or "" if the video
+    has no fetchable captions. Never raises — a failure here just means that
+    candidate can't be transcript-scored, not that the whole run breaks.
+    """
+    raw = _download_vtt(video_url)
+    if not raw:
+        return ""
     text = _strip_vtt(raw)
     if len(text) > max_chars:
         text = text[:max_chars]
     return text
+
+
+def fetch_transcript_cues(video_url: str) -> list[dict]:
+    """Like fetch_transcript, but returns TIMED cues [{start, end, text}, ...]
+    so callers can find where a moment lands and cut on a real boundary.
+    Returns [] when no captions are available. Never raises."""
+    raw = _download_vtt(video_url)
+    if not raw:
+        return []
+    return parse_vtt_cues(raw)
 
 
 def score_transcript(transcript: str, title: str, topic: str,

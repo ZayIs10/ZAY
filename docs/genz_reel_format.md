@@ -215,3 +215,44 @@ Verify with ffprobe — must show `duration=30.000000`, `1080×1920`, both `h264
 8. **Render** — `npm run reels:render` (~5 min on Windows, 2 workers)
 9. **Mux** — ffmpeg command from §7 above
 10. **Verify** — ffprobe must show 30.000s + h264 + aac
+
+---
+
+## 9. Smart clip-window selection (tweet-card reels)
+
+For the tweet-card reel format (real footage + static card), the background
+clip is a WINDOW cut out of a longer YouTube video. We do **not** take the
+first N seconds — that ends the clip on a random timestamp (mid-word, mid-
+action, on a smash-cut). Instead we land the cut on a clean boundary, the way
+@evolving.ai and pro AI-clipping tools (Opus Clip) do: they detect topic
+shifts, sentence boundaries, speech pauses, and visual scene cuts, then end on
+a completed thought.
+
+**Module:** [publisher/media_sources/clip_window.py](../publisher/media_sources/clip_window.py)
+— free + deterministic (no LLM, no paid API).
+
+Four signals, all from data we already fetch:
+1. **Topic payoff** — the transcript cue where the topic keywords / version
+   number land densest is the moment the clip must contain.
+2. **Sentence / thought boundary** — end at the end of the sentence that
+   carries (or immediately follows) the payoff; never mid-word.
+3. **Natural pause** — snap the cut to a gap (≥0.45s) between caption cues, so
+   the ending feels intentional.
+4. **Stable frame** — nudge the end to the nearest ffmpeg scene-cut so we don't
+   freeze on a transition frame (one light `select='gt(scene,0.4)'` pass).
+
+Length is **not** fixed: it starts at the best moment and runs until the next
+clean boundary, within `[MIN_CLIP 10s, MAX_CLIP 58s]`.
+
+**Timing source:** `transcript_picker.fetch_transcript_cues()` returns the VTT
+as timed cues `[{start, end, text}]` (the same free yt-dlp auto-caption fetch
+used to pick the video by transcript in §research).
+
+**Wiring:** `tweet_card_reel.build_reel_for_row` calls `choose_clip_window()`
+after download, then passes `clip_start`/`clip_end` to `compositor.build()`,
+which seeks the source with `-ss <start>` (video+audio in sync) and plays the
+window.
+
+**Degrades safely:** a video with no captions → `(0, cap)` "from the start"
+(old behavior); any error in windowing → full clip. The build never fails on
+clip-window selection.

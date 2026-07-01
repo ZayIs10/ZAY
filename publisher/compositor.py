@@ -139,18 +139,35 @@ def build(
     *,
     preview_seconds: float = 1.0,
     max_seconds: float = 60.0,
+    clip_start: float = 0.0,
+    clip_end: float | None = None,
 ) -> Path:
-    """Composite the reel and write `out_path`. Returns the output path."""
+    """Composite the reel and write `out_path`. Returns the output path.
+
+    `clip_start`/`clip_end` select a WINDOW inside the source video (chosen by
+    media_sources.clip_window so the reel ends on a clean sentence/scene
+    boundary instead of a random timestamp). When clip_end is None the old
+    behavior applies: play from the start, capped at max_seconds.
+    """
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     src_dur = probe_duration(source_video)
-    total_dur = min(preview_seconds + src_dur, max_seconds)
+
+    # Resolve the requested window against the real source duration.
+    clip_start = max(0.0, float(clip_start or 0.0))
+    if clip_end is not None:
+        window = max(0.5, min(float(clip_end), src_dur) - clip_start)
+    else:
+        window = max(0.5, src_dur - clip_start)
+
+    total_dur = min(preview_seconds + window, max_seconds)
     # If we hit the cap, the source plays for (max - preview) seconds.
     src_play_dur = max(0.5, total_dur - preview_seconds)
 
     log.info(
-        "Composite: poster %.1fs + source %.1fs (cap %.1f) -> total %.1fs",
-        preview_seconds, src_play_dur, max_seconds, total_dur,
+        "Composite: poster %.1fs + source[%.1f-%.1f] %.1fs (cap %.1f) -> total %.1fs",
+        preview_seconds, clip_start, clip_start + src_play_dur,
+        src_play_dur, max_seconds, total_dur,
     )
 
     crop_filter = _FIT_FILTER
@@ -178,8 +195,14 @@ def build(
         "-i", f"color=c=black:s={CANVAS_W}x{CANVAS_H}:r=30",
         # 1: poster (loop infinitely; trim handles the 1s window).
         "-loop", "1", "-i", str(poster_image),
-        # 2: source video.
-        "-i", str(source_video),
+    ]
+    # 2: source video, seeked to the chosen window start. -ss BEFORE -i is a
+    # fast keyframe seek and shifts video+audio together, so the window's audio
+    # stays in sync. Omitted when start==0 (play from the top).
+    if clip_start > 0.05:
+        cmd += ["-ss", f"{clip_start:.2f}"]
+    cmd += ["-i", str(source_video)]
+    cmd += [
         # 3: tweet card PNG.
         "-i", str(card_png),
     ]

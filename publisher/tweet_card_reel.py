@@ -383,12 +383,37 @@ def build_reel_for_row(row: dict) -> Path:
         out_path=card_png,
     )
 
+    # Pick a CLEAN clip window so the reel ends on a completed sentence /
+    # speech pause / stable frame near the topic payoff — not a random cut at
+    # the 60s mark. Free + deterministic (transcript timestamps + one ffmpeg
+    # scene-detect pass). Degrades to (0, cap) when the video has no captions.
+    clip_start, clip_end = 0.0, None
+    try:
+        from publisher.media_sources.clip_window import choose_clip_window
+        from publisher.media_consumer import _resolve_ffmpeg
+        window = choose_clip_window(
+            topic,
+            video_url=video_url,
+            video_path=Path(source_video),
+            context=(row.get("Key Points") or ""),
+            ffmpeg=_resolve_ffmpeg(),
+            max_clip=58.0,
+        )
+        clip_start, clip_end = window["start"], window["end"]
+        log.info("Clip window: %.1f-%.1fs (%.1fs, scene-snapped=%s) — %s",
+                 window["start"], window["end"], window["duration"],
+                 window["snapped_to_scene"], window["detail"].get("reason"))
+    except Exception as exc:  # noqa: BLE001 — never fail the build on windowing
+        log.warning("Clip-window selection failed (%s) — using full clip.", exc)
+
     out_mp4 = RENDERS_DIR / f"{slug}-tweet.mp4"
     log.info("Compositing reel (video) -> %s", out_mp4.name)
     composite_reel(
         card_png, source_video, poster_path, out_mp4,
         preview_seconds=1.0,
         max_seconds=60.0,
+        clip_start=clip_start,
+        clip_end=clip_end,
     )
 
     if not out_mp4.exists() or out_mp4.stat().st_size == 0:
