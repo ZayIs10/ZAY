@@ -34,14 +34,23 @@ import logging
 import re
 import subprocess
 from pathlib import Path
-from typing import Any
 
 log = logging.getLogger("media_sources.clip_window")
 
-try:  # reuse the one keyword/version definition the whole pipeline shares
+# reuse the one keyword/version definition the whole pipeline shares — robust
+# across every import style (see transcript_picker for the same pattern).
+try:
     from publisher.media_sources.scoring import topic_keywords
 except Exception:  # noqa: BLE001
-    from scoring import topic_keywords  # type: ignore
+    try:
+        from media_sources.scoring import topic_keywords  # type: ignore
+    except Exception:  # noqa: BLE001
+        try:
+            from scoring import topic_keywords  # type: ignore
+        except Exception:  # noqa: BLE001
+            import sys as _sys
+            _sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from scoring import topic_keywords  # type: ignore
 
 
 # --- tunables --------------------------------------------------------------
@@ -250,7 +259,16 @@ def choose_clip_window(
                 fetch_transcript_cues,
             )
         except Exception:  # noqa: BLE001
-            from transcript_picker import fetch_transcript_cues  # type: ignore
+            try:
+                from media_sources.transcript_picker import (  # type: ignore
+                    fetch_transcript_cues,
+                )
+            except Exception:  # noqa: BLE001
+                import sys as _sys
+                _sys.path.insert(0, str(Path(__file__).resolve().parent))
+                from transcript_picker import (  # type: ignore
+                    fetch_transcript_cues,
+                )
         cues = fetch_transcript_cues(video_url)
 
     if not cues:

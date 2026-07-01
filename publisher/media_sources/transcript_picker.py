@@ -39,10 +39,21 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 # Reuse the exact keyword/version splitter the media scorer uses, so a
 # transcript is judged on the SAME distinctive tokens (version numbers, product
 # names) that pick the background clip — one relevance definition, not two.
-try:  # package import (media_finder runs with repo root on sys.path)
+# Robust across every import style callers use (repo root on path; publisher/
+# on path via research_topic; or inside the pkg dir): try each, and as a final
+# fallback add this module's own directory so `scoring` always resolves.
+try:  # 1. package import (media_finder runs with repo root on sys.path)
     from publisher.media_sources.scoring import topic_keywords
-except Exception:  # noqa: BLE001 — flat import when run from inside the pkg dir
-    from scoring import topic_keywords  # type: ignore
+except Exception:  # noqa: BLE001
+    try:  # 2. publisher/ on sys.path (research_topic.py)
+        from media_sources.scoring import topic_keywords  # type: ignore
+    except Exception:  # noqa: BLE001
+        try:  # 3. media_sources/ itself on sys.path
+            from scoring import topic_keywords  # type: ignore
+        except Exception:  # noqa: BLE001 — 4. self-heal: add our dir, retry
+            import sys as _sys
+            _sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from scoring import topic_keywords  # type: ignore
 
 
 # --- transcript scoring weights -------------------------------------------
@@ -57,6 +68,15 @@ VERSION_HIT_POINTS = 40      # transcript says the exact version (4.8, gpt-5) �
 TITLE_TERM_POINTS = 4        # small extra weight when the TITLE also carries a term
 COVERAGE_BONUS = 25          # transcript hits EVERY distinctive topic word
 NO_TRANSCRIPT_SCORE = -1     # candidates we couldn't transcribe sort below any real one
+# WRONG-VERSION penalty: the topic names version X (4.8) but the transcript
+# never says X and instead prominently features a DIFFERENT version of the same
+# product (4.5). That's a video about the OLD model — sink it below any clip
+# that does say the right version. (Real bug caught on a live run: a topic about
+# "Opus 4.8" picked an "Opus 4.5" video that won on generic words.)
+WRONG_VERSION_PENALTY = 45
+# A "same family" version looks like the topic's version with the minor bumped
+# down/up, e.g. topic 4.8 vs transcript 4.5/4.6/4.7 — same product, wrong release.
+_FAMILY_VERSION_RE = re.compile(r"\b(\d+)\.\d+\b")
 
 
 def _youtube_cookiefile() -> str | None:
@@ -294,12 +314,31 @@ def score_transcript(transcript: str, title: str, topic: str,
             hit_versions.append(v)
             score += VERSION_HIT_POINTS
 
+    # WRONG-VERSION penalty. The topic pins a version (e.g. 4.8) but this
+    # transcript never says it AND prominently talks about a DIFFERENT release
+    # of the SAME product family (e.g. 4.5) — it's about the old model, not the
+    # one we're posting about. Sink it so a right-version clip always wins.
+    wrong_version = ""
+    if versions and not hit_versions:
+        # major numbers our topic versions belong to (4.8 -> "4")
+        topic_majors = {m.group(1) for v in versions
+                        for m in [_FAMILY_VERSION_RE.match(v)] if m}
+        for fm in _FAMILY_VERSION_RE.finditer(text_l):
+            token = fm.group(0)               # e.g. "4.5"
+            if token in versions:
+                continue                       # right version (shouldn't happen here)
+            if fm.group(1) in topic_majors:    # same product family, wrong minor
+                wrong_version = token
+                score -= WRONG_VERSION_PENALTY
+                break
+
     if words and len(hit_terms) == len(words):
         score += COVERAGE_BONUS
 
     detail = {
         "hit_terms": hit_terms,
         "hit_versions": hit_versions,
+        "wrong_version": wrong_version,
         "total_terms": len(words),
         "total_versions": len(versions),
         "chars": len(transcript),
@@ -328,10 +367,15 @@ def pick_best_by_transcript(
           "considered": [ {title, url, score}, ... ],  # for logging
         }
     """
-    try:  # package or flat import, same as scoring.py does
+    try:  # robust across every import style (see top-of-module scoring import)
         from publisher.media_sources.youtube import search_videos
     except Exception:  # noqa: BLE001
-        from youtube import search_videos  # type: ignore
+        try:
+            from media_sources.youtube import search_videos  # type: ignore
+        except Exception:  # noqa: BLE001
+            import sys as _sys
+            _sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from youtube import search_videos  # type: ignore
 
     candidates = search_videos(topic, limit=max_candidates, channel_id=channel_id)
     if not candidates:
@@ -354,9 +398,11 @@ def pick_best_by_transcript(
             "transcript": transcript,
             "detail": detail,
         })
-        log.info("  transcript-score %d  %r  (terms %s, versions %s)",
+        wv = detail.get("wrong_version")
+        log.info("  transcript-score %d  %r  (terms %s, versions %s%s)",
                  s, title[:60],
-                 detail.get("hit_terms"), detail.get("hit_versions"))
+                 detail.get("hit_terms"), detail.get("hit_versions"),
+                 f", WRONG-VERSION {wv}" if wv else "")
 
     if not scored:
         return None
