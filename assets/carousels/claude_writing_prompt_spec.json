@@ -1,0 +1,90 @@
+{
+  "topic": "The One Prompt That Fixes Claude's Writing",
+  "caption": {
+    "hook": "The one prompt that fixes Claude's robotic writing 🧵",
+    "summary": "Claude pads, hedges and leans on the same AI words by default — 'delve', 'tapestry', 'in conclusion'. Readers feel it instantly. This one rewrite prompt fixes it in a single paste.",
+    "content": "The prompt:\n\"Rewrite the text below. Strip every filler phrase, hedge and AI-ism. Use short, concrete sentences and vary their length so it sounds human. Keep my facts exact. Return only the edited text.\"\n\nPro tip: add one line — 'Write it for a busy founder who skims.' — and it gets sharper.",
+    "cta": "Save this + follow @genzcapital for daily AI tools & how-tos. No fluff. No hype.",
+    "hashtags": [
+      "#AItools", "#Claude", "#AIwriting", "#promptengineering",
+      "#ChatGPT", "#artificialintelligence", "#aitips", "#genzcapital"
+    ]
+  },
+  "slides": [
+    {
+      "type": "cover",
+      "kicker": "THE ONE PROMPT",
+      "headline": "The One Prompt That Fixes Claude's Writing",
+      "neon_word": "Fixes",
+      "counter_value": "1 prompt",
+      "counter_label": "kills the robotic tone",
+      "ref_query": "glowing keyboard dark typing hands",
+      "media_keywords": ["claude_write_1", "keyboard"]
+    },
+    {
+      "type": "content",
+      "kicker": "THE PROBLEM",
+      "headline": "Claude Sounds Like A Robot By Default",
+      "neon_word": "Robot",
+      "body": "Out of the box it hedges, over-explains and leans on the same AI words — 'delve', 'tapestry', 'in conclusion'. Readers feel it instantly.",
+      "ref_query": "humanoid robot writing at desk",
+      "media_keywords": ["claude_write_2", "robot"]
+    },
+    {
+      "type": "content",
+      "kicker": "WHY IT HAPPENS",
+      "headline": "It's Trained To Be Safe, Not Sharp",
+      "neon_word": "Sharp",
+      "body": "Models default to padded, neutral prose. You have to tell it to cut the fluff — it won't do it on its own.",
+      "ref_query": "glowing AI brain circuit dark",
+      "media_keywords": ["claude_write_3", "brain"]
+    },
+    {
+      "type": "content",
+      "kicker": "THE FIX",
+      "headline": "Paste This Before Your Draft",
+      "neon_word": "This",
+      "body": "Rewrite the text below. Strip filler, hedges and AI-isms. Short concrete sentences. Vary length so it sounds human. Keep my facts exact. Return only the edited text.",
+      "ref_query": "dark screen glowing cursor command line",
+      "media_keywords": ["claude_write_4", "terminal"]
+    },
+    {
+      "type": "content",
+      "kicker": "BEFORE  →  AFTER",
+      "headline": "Same Idea. Half The Words.",
+      "neon_word": "Half",
+      "body": "Before: 'In today's fast-paced world it is important to delve into…' After: 'Here's what actually matters.' That's the whole difference.",
+      "ref_query": "messy paper versus clean minimal desk",
+      "media_keywords": ["claude_write_5", "split"]
+    },
+    {
+      "type": "content",
+      "kicker": "PRO TIP",
+      "headline": "Tell It Who You Are Writing For",
+      "neon_word": "Who",
+      "body": "Add one line: 'Write it for a busy founder who skims.' The prompt gets sharper the second Claude knows the reader.",
+      "ref_query": "young founder reading phone walking office",
+      "media_keywords": ["claude_write_6", "founder"]
+    },
+    {
+      "type": "recap",
+      "headline": "What You Just Learned",
+      "neon_word": "Learned",
+      "points": [
+        "Claude pads and hedges by default — you have to fix it.",
+        "Paste the 'sound human' rewrite prompt before any draft.",
+        "Force short, concrete, varied sentences; ban AI-isms.",
+        "Name the reader so the tone matches who's reading."
+      ]
+    },
+    {
+      "type": "cta",
+      "headline": "Follow For Free",
+      "pills": [
+        "DAILY AI TOOLS & HOW-TOS",
+        "PROMPTS THAT ACTUALLY WORK",
+        "NO FLUFF. NO HYPE."
+      ]
+    }
+  ]
+}

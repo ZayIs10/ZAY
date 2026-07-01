@@ -1,0 +1,15 @@
+{
+  "topic": "Build an App With No Code Using Claude Code",
+  "slides": [
+    "slide_1_cover.png",
+    "slide_2_content.png",
+    "slide_3_content.png",
+    "slide_4_content.png",
+    "slide_5_content.png",
+    "slide_6_content.png",
+    "slide_7_recap.png",
+    "slide_8_cta.png",
+    "slide_9_caption.png"
+  ],
+  "caption": "Build a working app without writing a single line of code.\n\nClaude Code is an AI that lives in your terminal. You describe the app in plain English and it writes, runs, and fixes the code for you. Here's the exact 4-step flow.\n\n\u2022 Install Claude Code with one command\n\u2022 Open it inside an empty project folder\n\u2022 Describe the app you want in plain English\n\u2022 Tell it to run the app and fix any errors\n\nSave this + follow @genzcapital for daily AI tools & how-tos. No fluff. No hype.\n\n#ai #aitools #aitips #artificialintelligence #genzcapital"
+}

@@ -1,0 +1,83 @@
+{
+  "topic": "Anthropic Says New Claude Mythos AI Is Too Risky for Public Use",
+  "format": "news_hybrid",
+  "caption": {
+    "hook": "Anthropic reportedly says its new Claude AI is too risky to release. 🧵",
+    "summary": "According to the report, Anthropic isn't shipping its newest Claude model to the public — they're saying it's too risky for now. Take the specifics with a grain of salt until there's official confirmation.",
+    "content": "The bigger picture (true either way):\n• AI capability is moving faster than the rules around it.\n• Whether a model ships often comes down to safety, not just how smart it is.\n• \"Too risky to release\" is becoming a real sentence labs say out loud.\n\nWhat actually helps you: don't wait for the next model. Get genuinely good with the AI tools you already have. Skill beats access.",
+    "cta": "Save this + follow @genzcapital for daily AI tools & how-tos. No fluff. No hype.",
+    "hashtags": [
+      "#Anthropic", "#Claude", "#AIsafety", "#artificialintelligence",
+      "#AInews", "#frontierAI", "#aitips", "#genzcapital"
+    ]
+  },
+  "slides": [
+    {
+      "type": "cover",
+      "kicker": "AI NEWS",
+      "headline": "Anthropic Says Its New Claude AI Is Too Risky To Release",
+      "neon_word": "Risky",
+      "subheadline": "A report says it's too dangerous to release — here's what it means for you",
+      "counter_value": "TOO RISKY",
+      "counter_label": "for public use",
+      "image_plan": "HERO = the person behind it + the brand, @evolving.ai-style. Search query is AUTO-derived from the topic by topic_keywords() (person + brand), so no hand-written ref_query.",
+      "media_keywords": ["claude_mythos_1", "anthropic"]
+    },
+    {
+      "type": "content",
+      "kicker": "THE REPORT",
+      "headline": "The claim: too risky to release",
+      "neon_word": "Risky",
+      "body": "The report says Anthropic is holding its newest Claude back from the public over safety. The exact details aren't confirmed yet — treat them as a claim, not gospel.",
+      "ref_query": "Anthropic logo office dark",
+      "media_keywords": ["claude_mythos_2", "anthropic"]
+    },
+    {
+      "type": "content",
+      "kicker": "THE PATTERN",
+      "headline": "Capability is outrunning the rules",
+      "neon_word": "outrunning",
+      "body": "True regardless of the specifics: AI is getting more powerful faster than anyone's figuring out how to release it safely.",
+      "ref_query": "glowing AI data center servers dark",
+      "media_keywords": ["claude_mythos_3", "datacenter"]
+    },
+    {
+      "type": "content",
+      "kicker": "THE REAL SHIFT",
+      "headline": "Shipping now depends on safety",
+      "neon_word": "safety",
+      "body": "Whether a model reaches the public increasingly comes down to whether a lab thinks it's safe — not just how smart it is.",
+      "ref_query": "AI safety lab control room dark",
+      "media_keywords": ["claude_mythos_4", "control"]
+    },
+    {
+      "type": "content",
+      "kicker": "WHAT IT MEANS FOR YOU",
+      "headline": "Access is not your edge",
+      "neon_word": "edge",
+      "body": "Everyone gets powerful models eventually. The people who win are the ones who actually know how to use them.",
+      "ref_query": "person using laptop glowing screen night",
+      "media_keywords": ["claude_mythos_5", "user"]
+    },
+    {
+      "type": "recap",
+      "headline": "What you just learned",
+      "neon_word": "learned",
+      "points": [
+        "A report says Anthropic is holding its newest Claude back over safety.",
+        "Details aren't confirmed — treat the specifics as a claim, not fact.",
+        "Either way: capability is outrunning the rules around releasing it.",
+        "Your edge is skill with today's tools, not access to tomorrow's."
+      ]
+    },
+    {
+      "type": "cta",
+      "headline": "Follow For Free",
+      "pills": [
+        "DAILY AI TOOLS & HOW-TOS",
+        "FRONTIER AI, EXPLAINED SIMPLY",
+        "NO FLUFF. NO HYPE."
+      ]
+    }
+  ]
+}
