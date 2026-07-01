@@ -1,0 +1,96 @@
+{
+  "topic": "Claude Now Lives Inside Excel and Word",
+  "format": "ai_in_the_wild",
+  "caption": {
+    "hook": "Claude just moved into the two apps you already live in: Excel and Word.",
+    "summary": "Anthropic put Claude directly inside Microsoft's docs and spreadsheets — so instead of copy-pasting between a chatbot and your files, the AI now works in the file with you. Here's what people are actually doing with it.",
+    "content": "• Building and fixing spreadsheet formulas by describing them in plain English\n• Turning a messy sheet into a clean summary, chart or pivot in seconds\n• Drafting and rewriting Word docs — reports, emails, contracts — in-line, keeping your formatting",
+    "cta": "Save this so you can try it, then tell me: which one would you use first? Follow @genzcapital for real AI use cases every week. No fluff. No hype.",
+    "hashtags": [
+      "#ai",
+      "#aitools",
+      "#claude",
+      "#excel",
+      "#microsoft365",
+      "#productivity",
+      "#aitips",
+      "#genzcapital"
+    ]
+  },
+  "slides": [
+    {
+      "type": "cover",
+      "kicker": "AI IN THE WILD",
+      "headline": "CLAUDE NOW LIVES INSIDE EXCEL AND WORD",
+      "neon_word": "INSIDE",
+      "media_keywords": [
+        "claude_now_lives_inside_excel_and_word_1",
+        "excel"
+      ],
+      "subheadline": "3 real ways people are using it in their own files",
+      "counter_value": "3",
+      "counter_label": "USE CASES",
+      "prompt": "A dramatic dark cinematic hero shot of a laptop on a desk glowing in near-black, its screen filled with a Microsoft Excel spreadsheet grid of numbers and a Microsoft Word document beside it, a single neon-green glow emanating from the screen as if an AI is working inside the files. The Excel green icon and the Word blue icon float subtly as light sources. Empty clean near-black space across the bottom 40% for a headline. One focal point, moody rim lighting, no people, no text anywhere in the image."
+    },
+    {
+      "type": "video",
+      "kicker": "SEE IT",
+      "headline": "WATCH IT WORK A SPREADSHEET",
+      "neon_word": "WATCH",
+      "media_keywords": [
+        "claude_now_lives_inside_excel_and_word_2",
+        "spreadsheet"
+      ]
+    },
+    {
+      "type": "content",
+      "kicker": "USE CASE 1",
+      "headline": "FORMULAS IN PLAIN ENGLISH",
+      "neon_word": "FORMULAS",
+      "media_keywords": [
+        "claude_now_lives_inside_excel_and_word_3",
+        "formula"
+      ],
+      "body": "Describe what you want — \"flag every row over budget\" — and Claude writes the Excel formula and explains it, right in the cell.",
+      "ref_query": "Claude Excel formula demo",
+      "source": "",
+      "prompt": "A close-up cinematic shot of a Microsoft Excel spreadsheet on a screen in near-black surroundings, one cell glowing neon green showing a formula being written automatically (=IF...), rows of budget numbers with one row highlighted in neon green as if flagged by an AI. A soft neon-green cursor glow. Dark moody background, one clear focal point on the highlighted formula cell, no people, no watermark, no text captions overlaid — just the spreadsheet UI."
+    },
+    {
+      "type": "content",
+      "kicker": "USE CASE 2",
+      "headline": "MESSY SHEET TO CLEAN SUMMARY",
+      "neon_word": "CLEAN",
+      "media_keywords": [
+        "claude_now_lives_inside_excel_and_word_4",
+        "summary"
+      ],
+      "body": "Point it at a raw export and it groups, totals and turns rows into a readable summary or chart — no manual pivots.",
+      "ref_query": "Claude Excel summarize data demo",
+      "source": ""
+    },
+    {
+      "type": "content",
+      "kicker": "USE CASE 3",
+      "headline": "DRAFT AND REWRITE IN WORD",
+      "neon_word": "REWRITE",
+      "media_keywords": [
+        "claude_now_lives_inside_excel_and_word_5",
+        "document"
+      ],
+      "body": "Inside Word it drafts reports and emails, tightens your writing and keeps your formatting — no copy-paste from a separate chatbot.",
+      "ref_query": "Claude Word document draft demo",
+      "source": ""
+    },
+    {
+      "type": "cta",
+      "headline": "Save this — you'll want to try #1",
+      "neon_word": "Save",
+      "pills": [
+        "WHICH WOULD YOU TRY? COMMENT BELOW",
+        "REAL AI USE CASES, EVERY WEEK",
+        "NO FLUFF. NO HYPE."
+      ]
+    }
+  ]
+}

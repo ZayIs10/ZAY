@@ -493,9 +493,17 @@ def run(spec: dict, *, dry_run: bool = False, to_drive: bool = False,
         # through to a single AI generation (~$0.08) so the hook still lands.
         # For every content slide, a missing thumbnail just uses the media_zone
         # still fallback — we never pay to generate a use-case slide.
+        # An explicit hand-locked beat["prompt"] ALWAYS wins — even in
+        # ai_in_the_wild. This is the escape hatch for the "visuals must match
+        # the words" rule: when a free thumbnail is off-topic, pin that ONE
+        # slide to an approved AI prompt (paid) while every other slide stays a
+        # free thumbnail. Without this, the wild branch below would grab the
+        # thumbnail and skip the override entirely.
         is_wild = spec.get("format") == "ai_in_the_wild"
-        use_real_thumb = is_wild and ref and ref.get("media_url")
-        if is_wild and not (beat.get("type") == "cover" and not use_real_thumb):
+        has_override = bool(beat.get("prompt"))
+        use_real_thumb = is_wild and not has_override and ref and ref.get("media_url")
+        if is_wild and not has_override and not (
+                beat.get("type") == "cover" and not use_real_thumb):
             # dry-run: report the plan; real: download the thumbnail to out_path
             if dry_run:
                 entry["action"] = ("use real thumbnail (free)" if use_real_thumb

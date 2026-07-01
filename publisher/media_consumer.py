@@ -118,14 +118,18 @@ def _http_download(url: str, dest: Path) -> None:
 # confirm you're not a bot" gate that blocks the default `web` client from a
 # datacenter IP (GitHub Actions). Trying them in turn means we download WITHOUT
 # needing login cookies — which rot every week or two and were the real cause
-# of rows being skipped "no video found". Order = most-reliable-cookieless first.
-#   tv          — the living-room client; very lenient, rarely bot-gated.
-#   ios / android — mobile app clients; separate quota, usually cookieless-ok.
-#   web_safari  — desktop Safari surface; sometimes works when `web` is gated.
-# `web` is intentionally LAST (and only with cookies) because it's the one that
-# bot-blocks. See yt-dlp wiki: Extractors#youtube player_client.
-_YT_CLIENTS_COOKIELESS = ("tv", "ios", "android", "web_safari")
-_YT_CLIENTS_WITH_COOKIES = ("web", "tv", "ios")
+# of rows being skipped "no video found". Order = HD-capable-and-reliable first.
+#   tv_embedded / web_safari — expose the FULL ladder up to 1080p+.
+#   tv          — living-room client; lenient, rarely bot-gated (HD when served).
+#   ios         — mobile app client; separate quota, usually cookieless-ok.
+#   android / mweb — LAST: on many videos they only serve up to 360p, which
+#                    upscales to a BLURRY 1080-wide reel. Only fall back to them
+#                    when every HD-capable client is bot-blocked.
+# `web` bot-blocks the most, so it's cookies-only. See yt-dlp wiki:
+# Extractors#youtube player_client.
+_YT_CLIENTS_COOKIELESS = ("web_safari", "tv_embedded", "tv", "ios",
+                          "android", "mweb")
+_YT_CLIENTS_WITH_COOKIES = ("web", "web_safari", "tv", "ios")
 
 
 def _ytdlp_base_opts(dest: Path, section_seconds: float | None = None,
@@ -143,14 +147,20 @@ def _ytdlp_base_opts(dest: Path, section_seconds: float | None = None,
     exact final cut, so frame-accurate boundaries aren't needed here.
     """
     opts = {
-        # Permissive: any video+audio, merged to mp4. The strict ext=mp4
-        # filter could leave "Requested format is not available" when the
-        # chosen player client only exposes webm/av1 streams.
-        # Cap height at 1440p: the reel output is 1080x1920, so a 4K source is
-        # pure wasted bandwidth (invisible once centre-cropped to 1080 wide) —
-        # 1440p already gives ample detail. Falls back to best if a client
-        # exposes nothing <=1440p, so format selection never fails.
-        "format": "bv*[height<=1440]+ba/b[height<=1440]/bv*+ba/b",
+        # Prefer HD, and REQUIRE >=720p first so a client that only serves 360p
+        # (android/mweb do, on many videos) FAILS this selection and we fall
+        # through to the next, HD-capable client — instead of silently taking
+        # 360p and upscaling it into a blurry 1080-wide reel. Cap at 1440p (the
+        # reel is 1080 wide; 4K is wasted bandwidth). Only if EVERY client lacks
+        # HD do we accept a low-res source (a soft reel still beats no reel).
+        # ext=mp4 is NOT forced — some clients only expose webm/av1, and a
+        # strict mp4 filter would spuriously "format not available".
+        "format": (
+            "bv*[height>=720][height<=1440]+ba/"   # ideal: 720–1440p video+audio
+            "b[height>=720][height<=1440]/"          # muxed 720–1440p
+            "bv*[height<=1440]+ba/b[height<=1440]/"  # any <=1440p (may be <720p)
+            "bv*+ba/b"                                # absolute last resort
+        ),
         "outtmpl": str(dest),
         "quiet": True,
         "no_warnings": True,
