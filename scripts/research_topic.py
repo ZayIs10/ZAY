@@ -8,10 +8,15 @@ Usage:
 
 Pipeline:
   1. Enrich the topic with DuckDuckGo news (top 5) + YouTube search (top 3).
-  2. One GPT-4o call returns a full reel JSON: caption, headlines, reel_script,
+  2. YouTube URL: if the topic has no hand-picked YouTube URL, pick the video
+     whose TRANSCRIPT best matches the topic (free keyword/version scoring, no
+     GPT) and use THAT — not just the first search hit. Already-set URLs are
+     never touched.
+  3. One GPT-4o call returns a full reel JSON: caption, headlines, reel_script,
      proof_number, voiceover_lines (with timing), and a chosen template.
-  3. Append a row to the Google Sheet with Status='Draft'. The user reviews/edits,
-     then flips Status to 'Ready'. `scripts/build_and_publish_reel.py` picks it up.
+  4. Append a row to the Google Sheet with Status='Draft', filling YouTube URL,
+     Post Caption, and Reel Caption. The user reviews/edits, then flips Status
+     to 'Ready'. `scripts/build_and_publish_reel.py` picks it up.
 """
 
 from __future__ import annotations
@@ -141,6 +146,51 @@ def build_enriched_context(news: list[dict], videos: list[dict]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Transcript-based YouTube selection (free, no GPT)
+# ---------------------------------------------------------------------------
+
+def pick_youtube_by_transcript(topic: str, context: str) -> dict | None:
+    """Pick the YouTube video whose transcript best matches `topic`.
+
+    Delegates to publisher/media_sources/transcript_picker.py (yt-dlp search +
+    free auto-caption transcript + deterministic keyword/version scoring).
+    Returns the winner dict (url/title/transcript/score/...) or None when no
+    candidate had a usable, on-topic transcript. Never raises — any failure
+    degrades to None so drafting still proceeds.
+    """
+    try:
+        from media_sources.transcript_picker import pick_best_by_transcript
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Transcript picker unavailable (%s); "
+                    "falling back to first search hit.", exc)
+        return None
+    try:
+        pick = pick_best_by_transcript(topic, context=context)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Transcript picker failed (%s); "
+                    "falling back to first search hit.", exc)
+        return None
+    if pick:
+        log.info("Transcript pick: %s (score %d) — %s",
+                 pick["url"], pick["score"], pick["title"])
+    return pick
+
+
+def merge_transcript_into_context(context: str, pick: dict) -> str:
+    """Append a trimmed slice of the chosen video's transcript to the GPT
+    context so captions/headlines are grounded in real spoken content."""
+    transcript = (pick.get("transcript") or "").strip()
+    if not transcript:
+        return context
+    excerpt = transcript[:1500]
+    block = (
+        "\n\nChosen source video transcript (real spoken content — "
+        f"use its specifics):\n{excerpt}"
+    )
+    return (context + block).strip()
+
+
+# ---------------------------------------------------------------------------
 # GPT prompt
 # ---------------------------------------------------------------------------
 
@@ -249,6 +299,9 @@ REQUIRED_COLUMNS = [
     "Headline Line 3 (White)", "Subheadline (Gray)",
     "Key Stat", "Reel Script",
     "Reel Template", "Voiceover Lines (JSON)", "Reel MP4 URL",
+    # Caption columns the reel build reads: Reel Caption = on-screen card text
+    # (no hashtags); Post Caption = IG text-box caption (with hashtags).
+    "Reel Caption", "Post Caption",
 ]
 
 
@@ -272,12 +325,22 @@ def append_draft_row(reader, payload: dict) -> int:
     ws = reader.ws
     headers = ensure_columns(ws)
 
-    # Top YouTube URL (if any)
+    # YouTube URL: prefer the transcript-matched winner (the video whose spoken
+    # content best fits the topic). Fall back to the first raw search hit only
+    # when transcript selection found nothing usable.
     youtube_url = ""
-    if payload.get("_videos"):
+    pick = payload.get("_transcript_pick")
+    if pick and pick.get("url"):
+        youtube_url = pick["url"]
+    elif payload.get("_videos"):
         youtube_url = payload["_videos"][0].get("url", "")
 
     voiceover_json = json.dumps(payload.get("voiceover_lines", []), ensure_ascii=False)
+
+    # Reel Caption = the on-screen card text (the 5 punchy reel-script lines,
+    # no hashtags). Post Caption = the IG text-box caption (with hashtags).
+    reel_caption = (payload.get("reel_script") or "").strip()
+    post_caption = (payload.get("post_caption") or "").strip()
 
     # Map column name → value
     values: dict[str, Any] = {
@@ -302,6 +365,8 @@ def append_draft_row(reader, payload: dict) -> int:
         "Reel Template": payload.get("template", "five_beat"),
         "Voiceover Lines (JSON)": voiceover_json,
         "Reel MP4 URL": "",
+        "Reel Caption": reel_caption,
+        "Post Caption": post_caption,
     }
 
     row = [values.get(h, "") for h in headers]
@@ -326,6 +391,9 @@ def main() -> int:
                         help="Run enrichment + GPT, print the JSON, skip Sheet write.")
     parser.add_argument("--skip-enrich", action="store_true",
                         help="Skip DuckDuckGo + YouTube enrichment.")
+    parser.add_argument("--no-transcript", action="store_true",
+                        help="Skip transcript-based YouTube selection; use the "
+                             "first search hit for YouTube URL (old behavior).")
     parser.add_argument("--template", choices=["montage_hook", "five_beat", "auto"],
                         default="auto",
                         help="Force a template choice (default: GPT decides).")
@@ -348,6 +416,19 @@ def main() -> int:
         news = enrich_with_duckduckgo(args.topic, max_results=5)
         videos = enrich_with_youtube(args.topic, config.get("youtube", {}).get("api_key"))
     context = build_enriched_context(news, videos)
+
+    # Phase 1.2: pick the YouTube video whose TRANSCRIPT best matches the topic.
+    # A new topic has no hand-picked YouTube URL, so instead of blindly taking
+    # the first search hit (videos[0]), we transcript-score candidates and use
+    # the winner. Free + deterministic (no GPT). None => leave URL blank so the
+    # build-time media_finder does its own search.
+    transcript_pick = None
+    if not args.skip_enrich and not args.no_transcript:
+        transcript_pick = pick_youtube_by_transcript(args.topic, context)
+        if transcript_pick:
+            # Widen the GPT context with real spoken content from the chosen
+            # video so headlines/captions are grounded in what was actually said.
+            context = merge_transcript_into_context(context, transcript_pick)
 
     # Phase 1.5: format qualification — is this topic a REEL or a CAROUSEL?
     # Not every topic suits a 30s reel; multi-step how-tos / tool lists /
@@ -382,12 +463,17 @@ def main() -> int:
     payload["_brand_tone"] = config.get("brand_tone", "")
     payload["_context"] = context
     payload["_videos"] = videos
+    payload["_transcript_pick"] = transcript_pick
     payload["_post_type"] = fmt["format"]
     payload["_format_reason"] = fmt["reason"]
     payload["_generated_at"] = datetime.utcnow().isoformat() + "Z"
 
     if args.dry_run:
         printable = {k: v for k, v in payload.items() if not k.startswith("_")}
+        if transcript_pick:
+            printable["_youtube_url"] = transcript_pick["url"]
+            printable["_youtube_transcript_score"] = transcript_pick["score"]
+            printable["_youtube_considered"] = transcript_pick.get("considered")
         print(json.dumps(printable, indent=2, ensure_ascii=False))
         return 0
 
@@ -410,6 +496,12 @@ def main() -> int:
           f"{payload.get('headline_line_2', '')} / "
           f"{payload.get('headline_line_3', '')}")
     print(f"Proof:    {payload.get('proof_number', '')} {payload.get('proof_label', '')}")
+    if transcript_pick:
+        print(f"YouTube:  {transcript_pick['url']}  "
+              f"(transcript match score {transcript_pick['score']})")
+    else:
+        print("YouTube:  (no transcript match — media_finder will search at "
+              "build time)")
     print()
     print("Edit the row in Sheets, then flip Status from Draft to Ready:")
     print(f"  {sheet_url(spreadsheet_id, row_index)}")
