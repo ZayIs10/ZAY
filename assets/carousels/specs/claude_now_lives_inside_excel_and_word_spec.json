@@ -33,22 +33,12 @@
       "prompt": "A dramatic dark cinematic hero shot of a laptop on a desk glowing in near-black, its screen filled with a Microsoft Excel spreadsheet grid of numbers and a Microsoft Word document beside it, a single neon-green glow emanating from the screen as if an AI is working inside the files. The Excel green icon and the Word blue icon float subtly as light sources. Empty clean near-black space across the bottom 40% for a headline. One focal point, moody rim lighting, no people, no text anywhere in the image."
     },
     {
-      "type": "video",
-      "kicker": "SEE IT",
-      "headline": "WATCH IT WORK A SPREADSHEET",
-      "neon_word": "WATCH",
-      "media_keywords": [
-        "claude_now_lives_inside_excel_and_word_2",
-        "spreadsheet"
-      ]
-    },
-    {
       "type": "content",
       "kicker": "USE CASE 1",
       "headline": "FORMULAS IN PLAIN ENGLISH",
       "neon_word": "FORMULAS",
       "media_keywords": [
-        "claude_now_lives_inside_excel_and_word_3",
+        "claude_now_lives_inside_excel_and_word_2",
         "formula"
       ],
       "body": "Describe what you want — \"flag every row over budget\" — and Claude writes the Excel formula and explains it, right in the cell.",
@@ -62,12 +52,13 @@
       "headline": "MESSY SHEET TO CLEAN SUMMARY",
       "neon_word": "CLEAN",
       "media_keywords": [
-        "claude_now_lives_inside_excel_and_word_4",
+        "claude_now_lives_inside_excel_and_word_3",
         "summary"
       ],
       "body": "Point it at a raw export and it groups, totals and turns rows into a readable summary or chart — no manual pivots.",
       "ref_query": "Claude Excel summarize data demo",
-      "source": ""
+      "source": "",
+      "prompt": "A cinematic dark close-up of a Microsoft Excel spreadsheet on a screen in near-black surroundings, showing a messy chaotic block of raw data on the left visually transforming into a clean, organized neon-green bar chart and a tidy summary table on the right, with a soft neon-green glow and a subtle arrow of light flowing from the messy data toward the clean chart, as if an AI reorganized it. Moody teal-and-black grade, one clear focal point on the clean chart, no people, no faces, no watermark, no readable text captions — just the spreadsheet and chart UI."
     },
     {
       "type": "content",
@@ -75,12 +66,13 @@
       "headline": "DRAFT AND REWRITE IN WORD",
       "neon_word": "REWRITE",
       "media_keywords": [
-        "claude_now_lives_inside_excel_and_word_5",
+        "claude_now_lives_inside_excel_and_word_4",
         "document"
       ],
       "body": "Inside Word it drafts reports and emails, tightens your writing and keeps your formatting — no copy-paste from a separate chatbot.",
       "ref_query": "Claude Word document draft demo",
-      "source": ""
+      "source": "",
+      "prompt": "A cinematic dark close-up of a Microsoft Word document on a screen in near-black surroundings, showing a clean page of a professional report being written automatically, with a few lines glowing neon green as if an AI is drafting and tightening the text in real time, a soft neon-green cursor glow and the blue Word icon subtly floating as a light source. Moody teal-and-black grade, shallow depth of field, one clear focal point on the glowing paragraph, no people, no faces, no watermark, no readable text — the document text is blurred/illegible lorem-style lines only."
     },
     {
       "type": "cta",
