@@ -1,0 +1,1209 @@
+/* GenZ Capital — 9:16 reel styles. 1080x1920 stage.
+ * Reel #1: Faceless Montage Hook — recording-driven montage + text scenes.
+ */
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 1080px;
+  height: 1920px;
+  overflow: hidden;
+  background: #000;
+  color: #fff;
+  font-family: 'Inter', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root { position: relative; width: 1080px; height: 1920px; }
+
+/* === BEATS — every scene fills the stage and stacks via tracks === */
+.beat {
+  position: absolute; inset: 0;
+  width: 1080px; height: 1920px;
+  overflow: hidden;
+}
+
+/* === BACKGROUND VIDEO (montage scenes) === */
+.bg-video {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  transform: scale(1.00);
+  transform-origin: center;
+  filter: brightness(0.62) contrast(1.12) saturate(0.92);
+}
+
+/* === BACKGROUND IMAGES (account screenshots) === */
+.bg-image {
+  position: absolute; inset: 0;
+  overflow: hidden;
+  background: #000;
+}
+.bg-image img {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: contain;
+  transform-origin: center;
+  filter: brightness(0.95) contrast(1.05);
+}
+
+/* Scene 1 — profile screenshot occupies upper region of the canvas.
+ * Initial zoom is conservative so the avatar/logo stays visible;
+ * GSAP animates a slow Ken-Burns zoom in toward the follower count. */
+.bg-image.profile-shot {
+  inset: auto 0 auto 0;
+  top: 90px;
+  height: 1180px;
+  background: #050505;
+}
+.bg-image.profile-shot img {
+  transform: scale(1.0);
+  transform-origin: 62% 28%;
+  filter: brightness(1.0) contrast(1.05) saturate(1.05);
+  will-change: transform;
+}
+
+/* Scene 3 — post screenshot occupies upper region; text sits below in black space. */
+.bg-image.post-shot {
+  inset: auto 0 auto 0;
+  top: 100px;
+  height: 1280px;
+  background: #050505;
+}
+.bg-image.post-shot img {
+  transform: scale(1.05);
+  transform-origin: center top;
+  filter: brightness(1.0) contrast(1.05) saturate(1.05);
+}
+
+/* === VIGNETTES === */
+.vignette {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse at center, transparent 35%, rgba(0,0,0,0.88) 100%),
+    linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0) 35%, rgba(0,0,0,0) 60%, rgba(0,0,0,0.88) 100%);
+}
+.montage-vignette {
+  background:
+    radial-gradient(ellipse at center, transparent 30%, rgba(0,0,0,0.9) 100%),
+    linear-gradient(to bottom, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0.15) 30%, rgba(0,0,0,0.15) 70%, rgba(0,0,0,0.9) 100%);
+}
+
+.black-bg { position: absolute; inset: 0; background: #000; }
+
+/* === Persistent corner logo (visible across all scenes) === */
+.logo-corner-persistent {
+  position: absolute;
+  bottom: 60px; right: 60px;
+  display: flex; flex-direction: column; align-items: flex-end;
+  gap: 8px;
+  z-index: 50;
+  pointer-events: none;
+}
+.logo-corner-persistent .corner-divider {
+  width: 100px;
+  height: 3px;
+  background: #39FF14;
+  box-shadow: 0 0 10px #39FF14;
+}
+.logo-corner-persistent .corner-text {
+  font-family: 'Anton', sans-serif;
+  letter-spacing: 0.12em;
+  font-size: 28px;
+  color: #fff;
+  text-transform: uppercase;
+}
+
+/* === SCENE 1 — MONTAGE OVERLAY ===
+ * The montage-cell is a sibling of the <video> on a higher track.
+ * It needs full-stage positioning so its overlay sits on top of the video. */
+.montage-cell {
+  position: absolute; inset: 0;
+  width: 1080px; height: 1920px;
+  overflow: hidden;
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* Text sits in the bottom black band, below the profile screenshot. */
+.montage-overlay {
+  position: absolute;
+  top: 1280px;
+  left: 0;
+  width: 1080px;
+  height: 600px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  z-index: 10;
+}
+.montage-followers {
+  font-family: 'Anton', sans-serif;
+  font-size: 300px;
+  line-height: 0.9;
+  letter-spacing: -0.02em;
+  text-shadow:
+    0 0 50px rgba(57,255,20,0.85),
+    0 0 110px rgba(57,255,20,0.45);
+  margin-bottom: 18px;
+  will-change: transform, opacity, text-shadow;
+}
+.montage-handle {
+  font-family: 'Anton', sans-serif;
+  font-size: 90px;
+  letter-spacing: 0.04em;
+  color: #fff;
+  text-transform: lowercase;
+  text-shadow: 0 0 18px rgba(255,255,255,0.35);
+  will-change: transform, opacity, letter-spacing;
+}
+
+/* === SCENE 2 — QUESTION === */
+.radial-glow {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, rgba(57,255,20,0.18) 0%, rgba(57,255,20,0) 55%);
+  z-index: 2;
+}
+.question-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  z-index: 5;
+}
+.q-line {
+  font-family: 'Anton', sans-serif;
+  font-size: 180px;
+  line-height: 0.95;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  text-shadow: 0 6px 24px rgba(0,0,0,0.95);
+  margin-bottom: 12px;
+}
+
+/* === SCENE 3 — REVEAL === */
+/* Text band lives in the bottom region, below the post screenshot. */
+.reveal-text {
+  position: absolute;
+  top: 1410px;
+  left: 0;
+  width: 1080px;
+  height: 470px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  z-index: 4;
+  padding: 0 60px;
+}
+.reveal-line {
+  font-family: 'Anton', sans-serif;
+  font-size: 120px;
+  line-height: 0.92;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  text-shadow: 0 0 24px rgba(0,0,0,0.95);
+  margin-bottom: 6px;
+  will-change: transform, opacity, letter-spacing;
+}
+
+/* === SCENE 4 — CLIFFHANGER === */
+.cliffhanger-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  z-index: 4;
+  padding: 0 60px;
+}
+.cliff-line {
+  font-family: 'Anton', sans-serif;
+  line-height: 0.95;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  text-shadow: 0 6px 24px rgba(0,0,0,0.95);
+  margin-bottom: 18px;
+}
+.cliff-line.a { font-size: 110px; color: #fff; }
+.cliff-line.b { font-size: 220px; }
+.cliff-line.c { font-size: 70px; color: #fff; letter-spacing: 0.08em; margin-top: 12px; }
+
+/* === SCENE 5 — FINAL CTA === */
+.cta-block-final {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  z-index: 4;
+  padding: 0 60px;
+}
+.cta-comment {
+  font-family: 'Anton', sans-serif;
+  font-size: 180px;
+  line-height: 0.95;
+  letter-spacing: 0.02em;
+  color: #fff;
+  text-transform: uppercase;
+  text-shadow: 0 6px 24px rgba(0,0,0,0.95);
+}
+.cta-divider-final {
+  width: 0;
+  height: 5px;
+  background: #39FF14;
+  box-shadow: 0 0 18px #39FF14;
+  margin: 36px 0;
+}
+.cta-secrets {
+  font-family: 'Anton', sans-serif;
+  font-size: 130px;
+  line-height: 0.95;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.cta-follow {
+  margin-top: 36px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 800;
+  font-size: 42px;
+  letter-spacing: 0.06em;
+  color: #fff;
+  text-transform: uppercase;
+}
+
+/* === SHARED — neon class === */
+.neon {
+  color: #39FF14;
+  text-shadow: 0 0 32px rgba(57,255,20,0.65);
+}
+
+/* ==================================================================== */
+/* REEL #2 — ALGORITHM DECODED                                          */
+/* ==================================================================== */
+
+/* Scene 3 — numbered ranking signals "1. SHARES / 2. WATCH TIME / ..." */
+.signals-list {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  text-align: left;
+  z-index: 5;
+  padding: 0 90px;
+}
+.signal-row {
+  font-family: 'Anton', sans-serif;
+  font-size: 150px;
+  line-height: 1.0;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  text-shadow: 0 6px 24px rgba(0,0,0,0.95);
+  margin-bottom: 32px;
+  will-change: opacity, transform, letter-spacing;
+}
+
+/* Scene 4 — massive proof number "1%" with sublines */
+.proof2-block {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  z-index: 5;
+  padding: 0 60px;
+}
+.proof2-number {
+  font-family: 'Anton', sans-serif;
+  font-size: 760px;
+  line-height: 0.85;
+  letter-spacing: -0.04em;
+  will-change: transform, opacity, text-shadow;
+}
+.proof2-label {
+  margin-top: 24px;
+  font-family: 'Anton', sans-serif;
+  font-size: 78px;
+  letter-spacing: 0.04em;
+  color: #fff;
+  text-transform: uppercase;
+  text-shadow: 0 0 18px rgba(255,255,255,0.35);
+}
+.proof2-sublabel {
+  margin-top: 18px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 600;
+  font-size: 34px;
+  letter-spacing: 0.10em;
+  color: #A0A0A0;
+  text-transform: uppercase;
+}
+
+/* Scene 5 — 2x3 profile-circle grid above the CTA text */
+.cta-grid {
+  position: absolute;
+  top: 240px;
+  left: 0;
+  width: 1080px;
+  display: grid;
+  grid-template-columns: repeat(3, 200px);
+  gap: 36px;
+  justify-content: center;
+  z-index: 4;
+}
+.cta-grid img {
+  width: 200px;
+  height: 200px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 3px solid rgba(57,255,20,0.55);
+  box-shadow: 0 0 28px rgba(57,255,20,0.45);
+}
+
+/* ==================================================================== */
+/* REEL #3 — GEN Z AI $10K STACK                                        */
+/* ==================================================================== */
+
+.bg-image.full { inset: 0; height: 1920px; top: 0; }
+.bg-image.full img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  filter: brightness(0.62) contrast(1.12) saturate(0.95);
+  transform: scale(1.05);
+}
+.vignette.dark {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse at center, transparent 25%, rgba(0,0,0,0.92) 100%),
+    linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.15) 30%, rgba(0,0,0,0.15) 65%, rgba(0,0,0,0.92) 100%);
+}
+
+.beat-stack {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center;
+  padding: 0 70px;
+  z-index: 5;
+}
+.line-setup {
+  font-family: 'Anton', sans-serif;
+  font-size: 110px; line-height: 0.95;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #FFFFFF;
+  text-shadow: 0 6px 28px rgba(0,0,0,0.95);
+  margin-bottom: 24px;
+  will-change: transform, opacity, filter;
+}
+.line-setup.small { font-size: 72px; margin-top: 28px; margin-bottom: 0; }
+.line-punch {
+  font-family: 'Anton', sans-serif;
+  font-size: 280px; line-height: 0.9;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  will-change: transform, opacity, text-shadow, filter;
+}
+.line-sub {
+  margin-top: 28px;
+  font-family: 'Anton', sans-serif;
+  font-size: 90px; line-height: 0.95;
+  letter-spacing: 0.04em;
+  color: #FFFFFF;
+  text-transform: uppercase;
+  text-shadow: 0 4px 20px rgba(0,0,0,0.95);
+  will-change: transform, opacity, filter;
+}
+
+/* Beat 3 — list */
+.insight-block {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: flex-start; justify-content: center;
+  text-align: left;
+  padding: 0 110px;
+  z-index: 5;
+}
+.insight-head {
+  font-family: 'Anton', sans-serif;
+  font-size: 130px; line-height: 0.95;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #FFFFFF;
+  text-shadow: 0 6px 28px rgba(0,0,0,0.95);
+  margin-bottom: 60px;
+  will-change: transform, opacity, filter;
+}
+.insight-row {
+  display: flex; align-items: baseline; gap: 28px;
+  margin-bottom: 36px;
+  will-change: transform, opacity, filter;
+}
+.insight-row .num {
+  font-family: 'Anton', sans-serif;
+  font-size: 140px; line-height: 0.95;
+  letter-spacing: 0.02em;
+}
+.insight-row .tool {
+  font-family: 'Anton', sans-serif;
+  font-size: 130px; line-height: 0.95;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #FFFFFF;
+  text-shadow: 0 6px 22px rgba(0,0,0,0.95);
+}
+
+/* Beat 4 — proof */
+.proof-final {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center;
+  padding: 0 60px;
+  z-index: 5;
+}
+.proof-big {
+  font-family: 'Anton', sans-serif;
+  font-size: 460px; line-height: 0.85;
+  letter-spacing: -0.03em;
+  text-transform: uppercase;
+  will-change: transform, opacity, text-shadow, filter;
+}
+.proof-lbl {
+  margin-top: 36px;
+  font-family: 'Anton', sans-serif;
+  font-size: 78px; line-height: 1.0;
+  letter-spacing: 0.04em;
+  color: #FFFFFF;
+  text-transform: uppercase;
+  text-shadow: 0 4px 20px rgba(0,0,0,0.95);
+  will-change: transform, opacity, filter;
+}
+.proof-sub {
+  margin-top: 22px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 38px;
+  letter-spacing: 0.10em;
+  color: #A0A0A0;
+  text-transform: uppercase;
+  will-change: transform, opacity, letter-spacing;
+}
+
+/* Beat 5 — CTA */
+.cta-final {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center;
+  padding: 0 70px;
+  z-index: 5;
+}
+.cta-top {
+  font-family: 'Anton', sans-serif;
+  font-size: 200px; line-height: 0.95;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #FFFFFF;
+  text-shadow: 0 6px 28px rgba(0,0,0,0.95);
+  margin-bottom: 28px;
+  will-change: transform, opacity, filter;
+}
+.cta-mid {
+  font-family: 'Anton', sans-serif;
+  font-size: 110px; line-height: 0.95;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  will-change: transform, opacity, text-shadow, filter;
+}
+.cta-foot {
+  margin-top: 36px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 800;
+  font-size: 38px;
+  letter-spacing: 0.08em;
+  color: #FFFFFF;
+  text-transform: uppercase;
+  will-change: transform, opacity;
+}
+
+/* ==================================================================== */
+/* REEL #2 v2 — INSTAGRAM-POST MOCKUP                                    */
+/* The "camera" sits inside a real-feeling Instagram post. When the VO  */
+/* says "likes" / "DM" / "shares" / "saves", the whole mockup transforms */
+/* (scale + transform-origin) so the relevant icon fills the screen.    */
+/* ==================================================================== */
+
+.ig-mockup {
+  position: absolute; inset: 0;
+  width: 1080px; height: 1920px;
+  background: #000;
+  z-index: 3;
+  pointer-events: none;
+  transform-origin: 540px 960px;
+  will-change: transform, transform-origin, filter;
+}
+
+.ig-card {
+  position: absolute;
+  top: 200px;
+  left: 0;
+  width: 1080px;
+  height: 1500px;
+  background: #000;
+  color: #fff;
+  font-family: -apple-system, "Segoe UI", "Helvetica Neue", "Roboto", sans-serif;
+}
+
+/* Header: avatar + handle + menu */
+.ig-header {
+  position: absolute; top: 0; left: 0;
+  width: 100%; height: 110px;
+  display: flex; align-items: center;
+  padding: 0 28px; gap: 22px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.ig-avatar {
+  width: 78px; height: 78px;
+  border-radius: 50%;
+  background: linear-gradient(45deg,#f9ce34,#ee2a7b,#6228d7);
+  padding: 3px; flex-shrink: 0;
+}
+.ig-avatar-inner {
+  width: 100%; height: 100%;
+  border-radius: 50%;
+  background: #111;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Anton', sans-serif;
+  font-size: 30px; color: #fff;
+  letter-spacing: 0;
+}
+.ig-handle { flex: 1; display: flex; flex-direction: column; line-height: 1.05; }
+.ig-handle-name {
+  font-size: 30px; font-weight: 700; color: #fff;
+  letter-spacing: 0.01em;
+}
+.ig-handle-sub {
+  font-size: 22px; color: #a8a8a8; font-weight: 500;
+  margin-top: 4px;
+}
+.ig-menu {
+  font-size: 44px; line-height: 0.4;
+  letter-spacing: 0.08em; color: #fff;
+}
+
+/* Image area: 1080x1080 square that the recording fills */
+.ig-image {
+  position: absolute;
+  top: 110px; left: 0;
+  width: 1080px; height: 1080px;
+  overflow: hidden;
+  background: #050505;
+}
+.ig-image video,
+.ig-image img {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  filter: brightness(0.95) contrast(1.06) saturate(1.02);
+}
+.ig-image .ig-image-vignette {
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(to bottom, rgba(0,0,0,0.35) 0%, rgba(0,0,0,0) 18%, rgba(0,0,0,0) 78%, rgba(0,0,0,0.55) 100%);
+}
+
+/* Action bar — the row of icons under the post image */
+.ig-action-bar {
+  position: absolute;
+  top: 1190px; left: 0;
+  width: 1080px; height: 130px;
+  display: flex; align-items: center;
+  padding: 0 28px;
+  gap: 38px;
+}
+.ig-icon {
+  width: 88px; height: 88px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  position: relative;
+  transform-origin: center;
+  will-change: transform, filter, opacity;
+}
+.ig-icon svg {
+  width: 100%; height: 100%;
+  display: block;
+  overflow: visible;
+}
+.ig-icon svg .stroke {
+  stroke: #fff;
+  stroke-width: 2.4;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.ig-icon.heart-on svg .stroke,
+.ig-icon.fill-on svg .stroke { fill: var(--icon-fill, #fff); stroke: var(--icon-fill, #fff); }
+.ig-icon.heart-on { --icon-fill: #ff3040; }
+.ig-icon.heart-dead { --icon-fill: #4a4a4a; }
+.ig-icon.heart-dead svg .stroke { fill: #4a4a4a; stroke: #4a4a4a; }
+.ig-icon.share-glow { filter: drop-shadow(0 0 28px rgba(57,255,20,0.95)); }
+.ig-icon.bookmark-on svg .stroke { fill: #39FF14; stroke: #39FF14; }
+.ig-icon.bookmark-on { filter: drop-shadow(0 0 24px rgba(57,255,20,0.85)); }
+.ig-icon-spacer { flex: 1; }
+
+/* Strikethrough that crosses out the heart when "likes don't count" */
+.ig-strike {
+  position: absolute;
+  top: 50%; left: -10%;
+  width: 120%; height: 6px;
+  background: #ff3040;
+  border-radius: 4px;
+  transform: translateY(-50%) rotate(-18deg) scaleX(0);
+  transform-origin: left center;
+  box-shadow: 0 0 18px rgba(255,48,64,0.85);
+  pointer-events: none;
+}
+
+/* Likes counter and caption beneath action bar */
+.ig-likes {
+  position: absolute;
+  top: 1335px; left: 30px;
+  font-size: 30px; font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.005em;
+}
+.ig-likes .neon-num {
+  color: #39FF14;
+  text-shadow: 0 0 16px rgba(57,255,20,0.55);
+}
+.ig-likes.dim { color: #707070; }
+.ig-caption {
+  position: absolute;
+  top: 1385px; left: 30px;
+  width: 1020px;
+  font-size: 28px; line-height: 1.35;
+  color: #fff; font-weight: 400;
+}
+.ig-caption b { font-weight: 700; }
+.ig-caption .muted { color: #909090; }
+
+/* Spotlight ring that pulses around the icon being zoomed */
+.ig-spotlight {
+  position: absolute;
+  width: 240px; height: 240px;
+  border: 4px solid #39FF14;
+  border-radius: 50%;
+  box-shadow:
+    0 0 60px rgba(57,255,20,0.9),
+    inset 0 0 40px rgba(57,255,20,0.4);
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.4);
+  will-change: transform, opacity, top, left;
+  z-index: 5;
+}
+
+/* Big subtitle band sits ON TOP of the mockup so it stays readable
+ * even when the camera is fully zoomed into a single icon. */
+.r2-subtitle {
+  position: absolute;
+  left: 0; right: 0;
+  bottom: 170px;
+  text-align: center;
+  z-index: 12;
+  padding: 0 60px;
+  pointer-events: none;
+}
+.r2-sub-line {
+  font-family: 'Anton', sans-serif;
+  text-transform: uppercase;
+  line-height: 0.95;
+  letter-spacing: 0.02em;
+  text-shadow: 0 6px 28px rgba(0,0,0,0.98);
+  margin-bottom: 16px;
+  will-change: transform, opacity, filter;
+}
+.r2-sub-line.setup { font-size: 96px; color: #fff; }
+.r2-sub-line.punch { font-size: 184px; color: #39FF14; text-shadow: 0 0 60px rgba(57,255,20,0.8); }
+.r2-sub-line.small { font-size: 64px; color: #fff; }
+
+/* Numbered ranking list (Scene 3) — overlays the mockup */
+.r2-rank-list {
+  position: absolute;
+  inset: 0;
+  display: flex; flex-direction: column;
+  align-items: flex-start; justify-content: flex-end;
+  text-align: left;
+  padding: 0 80px 360px;
+  z-index: 11;
+  pointer-events: none;
+}
+.r2-rank-row {
+  font-family: 'Anton', sans-serif;
+  font-size: 130px; line-height: 1.0;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  text-shadow: 0 6px 24px rgba(0,0,0,0.98);
+  margin-bottom: 22px;
+  will-change: transform, opacity, filter;
+  display: flex; align-items: baseline; gap: 28px;
+}
+.r2-rank-row .num { color: #39FF14; }
+.r2-rank-row .lbl { color: #fff; }
+
+/* Scene 4 — massive 1% reveal (solid black) */
+.r2-proof {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center;
+  padding: 0 60px;
+  z-index: 6;
+}
+.r2-proof-num {
+  font-family: 'Anton', sans-serif;
+  font-size: 720px; line-height: 0.85;
+  letter-spacing: -0.04em;
+  color: #39FF14;
+  text-shadow: 0 0 120px rgba(57,255,20,1), 0 0 240px rgba(57,255,20,0.6);
+  will-change: transform, opacity, text-shadow;
+}
+.r2-proof-lbl {
+  margin-top: 28px;
+  font-family: 'Anton', sans-serif;
+  font-size: 84px; letter-spacing: 0.04em;
+  color: #fff; text-transform: uppercase;
+  text-shadow: 0 4px 20px rgba(0,0,0,0.95);
+}
+.r2-proof-sub {
+  margin-top: 22px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 600; font-size: 36px;
+  letter-spacing: 0.10em;
+  color: #A0A0A0; text-transform: uppercase;
+}
+
+/* Scene 5 — 2x3 profile grid + CTA */
+.r2-cta-grid {
+  position: absolute;
+  top: 280px; left: 0;
+  width: 1080px;
+  display: grid;
+  grid-template-columns: repeat(3, 220px);
+  grid-template-rows: repeat(2, 220px);
+  gap: 40px;
+  justify-content: center;
+  z-index: 6;
+}
+.r2-cta-grid img {
+  width: 220px; height: 220px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 3px solid rgba(57,255,20,0.6);
+  box-shadow: 0 0 28px rgba(57,255,20,0.45);
+  will-change: transform, opacity;
+}
+.r2-cta-text {
+  position: absolute;
+  top: 980px; left: 0;
+  width: 1080px;
+  display: flex; flex-direction: column;
+  align-items: center; text-align: center;
+  padding: 0 60px;
+  z-index: 7;
+}
+.r2-cta-comment {
+  font-family: 'Anton', sans-serif;
+  font-size: 160px; line-height: 0.95;
+  letter-spacing: 0.02em;
+  color: #fff; text-transform: uppercase;
+  text-shadow: 0 6px 24px rgba(0,0,0,0.95);
+}
+.r2-cta-divider {
+  width: 0; height: 5px;
+  background: #39FF14;
+  box-shadow: 0 0 18px #39FF14;
+  margin: 30px 0;
+}
+.r2-cta-tag {
+  font-family: 'Anton', sans-serif;
+  font-size: 116px; line-height: 0.95;
+  letter-spacing: 0.02em;
+  color: #39FF14;
+  text-transform: uppercase;
+  text-shadow: 0 0 36px rgba(57,255,20,0.65);
+}
+.r2-cta-follow {
+  margin-top: 30px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 800; font-size: 38px;
+  letter-spacing: 0.08em;
+  color: #fff; text-transform: uppercase;
+}
+
+/* ==================================================================== */
+/* REEL #4 — THE 4 SECRETS                                              */
+/* Black-bg + neon punch + screenshot callbacks. No new stock footage.  */
+/* ==================================================================== */
+
+/* Beat 1 — flash montage (4 profile screenshots, 0.55s each) */
+.r4-flash {
+  position: absolute; inset: 0;
+  width: 1080px; height: 1920px;
+  background: #050505;
+  overflow: hidden;
+}
+.r4-flash img {
+  position: absolute;
+  top: 90px; left: 0;
+  width: 1080px; height: 1180px;
+  object-fit: contain;
+  filter: brightness(0.95) contrast(1.10) saturate(1.05);
+}
+/* Apply a vignette on every flash via ::after so we don't need extra DOM */
+.r4-flash::after {
+  content: '';
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse at center, transparent 30%, rgba(0,0,0,0.88) 100%),
+    linear-gradient(to bottom, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0.15) 30%, rgba(0,0,0,0.15) 70%, rgba(0,0,0,0.92) 100%);
+  pointer-events: none;
+}
+
+/* Beat 1 — punch text */
+.r4-hook {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center;
+  padding: 0 60px;
+  z-index: 5;
+}
+.r4-hook-top {
+  font-family: 'Anton', sans-serif;
+  font-size: 110px; line-height: 0.95;
+  letter-spacing: 0.02em;
+  color: #FFFFFF;
+  text-transform: uppercase;
+  text-shadow: 0 6px 28px rgba(0,0,0,0.95);
+  margin-bottom: 36px;
+  will-change: transform, opacity, filter;
+}
+.r4-hook-num {
+  font-family: 'Anton', sans-serif;
+  font-size: 380px; line-height: 0.85;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  will-change: transform, opacity, text-shadow, filter;
+}
+
+/* Shared — secret card layout (used by beats 2, 3, 4 in different ways) */
+.r4-secret {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center;
+  padding: 0 70px;
+  z-index: 5;
+}
+.r4-secret-num {
+  font-family: 'Anton', sans-serif;
+  font-size: 200px; line-height: 0.9;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  margin-bottom: 18px;
+  will-change: transform, opacity, text-shadow, filter;
+}
+.r4-secret-line {
+  font-family: 'Anton', sans-serif;
+  line-height: 0.95;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  text-shadow: 0 6px 28px rgba(0,0,0,0.95);
+  margin-bottom: 14px;
+  will-change: transform, opacity, filter;
+}
+.r4-secret-line.a { font-size: 100px; color: #FFFFFF; }
+.r4-secret-line.b {
+  font-size: 170px;
+  will-change: transform, opacity, text-shadow, filter;
+}
+.r4-secret-sub {
+  margin-top: 28px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 38px;
+  letter-spacing: 0.10em;
+  color: #A0A0A0;
+  text-transform: uppercase;
+  will-change: transform, opacity, letter-spacing;
+}
+
+/* Beat 2 — silhouette icon */
+.r4-silhouette {
+  position: relative;
+  width: 280px;
+  height: 360px;
+  margin: 12px 0 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  will-change: transform, opacity, filter;
+}
+.silhouette-head {
+  position: absolute;
+  top: 0; left: 50%;
+  transform: translateX(-50%);
+  width: 160px; height: 160px;
+  border-radius: 50%;
+  background: #1a1a1a;
+  border: 4px solid #2a2a2a;
+}
+.silhouette-shoulders {
+  position: absolute;
+  bottom: 0; left: 50%;
+  transform: translateX(-50%);
+  width: 280px; height: 200px;
+  background: #1a1a1a;
+  border-radius: 50% 50% 0 0 / 60% 60% 0 0;
+  border: 4px solid #2a2a2a;
+  border-bottom: none;
+}
+.silhouette-mark {
+  position: absolute;
+  top: 30px; left: 50%;
+  transform: translateX(-50%);
+  font-family: 'Anton', sans-serif;
+  font-size: 120px; line-height: 1;
+  color: #39FF14;
+  text-shadow: 0 0 30px rgba(57,255,20,0.8);
+  z-index: 2;
+}
+
+/* Beat 3 — 2x2 post tile */
+.r4-tile-grid {
+  position: absolute;
+  top: 90px; left: 0;
+  width: 1080px;
+  height: 1080px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+  gap: 18px;
+  padding: 60px;
+  z-index: 2;
+}
+.r4-tile-grid img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  border-radius: 18px;
+  border: 2px solid rgba(57,255,20,0.35);
+  box-shadow: 0 0 24px rgba(57,255,20,0.25);
+  filter: brightness(0.85) contrast(1.10) saturate(1.05);
+  will-change: transform, opacity, filter;
+}
+.r4-tile-overlay {
+  position: absolute;
+  top: 1230px;
+  left: 0;
+  width: 1080px;
+  height: 600px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0 70px;
+  z-index: 6;
+}
+
+/* Beat 4 — DM-bait stack */
+.r4-dm-stack {
+  position: absolute;
+  top: 200px; left: 0;
+  width: 1080px;
+  display: flex; flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding: 0 60px;
+  z-index: 4;
+}
+.r4-comment-mock {
+  display: flex; align-items: flex-start; gap: 18px;
+  width: 100%;
+  background: #0c0c0c;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 16px;
+  padding: 24px 28px;
+  will-change: transform, opacity, filter;
+}
+.r4-comment-avatar {
+  width: 76px; height: 76px;
+  border-radius: 50%;
+  background: linear-gradient(45deg,#f9ce34,#ee2a7b,#6228d7);
+  flex-shrink: 0;
+}
+.r4-comment-bubble { flex: 1; text-align: left; }
+.r4-comment-handle {
+  font-family: 'Inter', sans-serif;
+  font-weight: 700; font-size: 28px;
+  color: #fff;
+}
+.r4-comment-text {
+  margin-top: 8px;
+  font-family: 'Anton', sans-serif;
+  font-size: 84px; line-height: 1.0;
+  letter-spacing: 0.04em;
+  color: #39FF14;
+  text-shadow: 0 0 24px rgba(57,255,20,0.55);
+}
+.r4-dm-arrow {
+  font-family: 'Anton', sans-serif;
+  font-size: 100px; line-height: 1;
+  color: #fff;
+  margin: 4px 0;
+  will-change: transform, opacity, color, text-shadow;
+}
+.r4-dm-mock {
+  width: 100%;
+  background: #0c0c0c;
+  border: 1px solid rgba(57,255,20,0.35);
+  border-radius: 16px;
+  padding: 24px 28px;
+  text-align: left;
+  box-shadow: 0 0 24px rgba(57,255,20,0.18);
+  will-change: transform, opacity, filter;
+}
+.r4-dm-handle {
+  font-family: 'Inter', sans-serif;
+  font-weight: 700; font-size: 26px;
+  color: #a8a8a8;
+}
+.r4-dm-bubble {
+  margin-top: 10px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 600; font-size: 38px;
+  color: #fff;
+  line-height: 1.3;
+}
+.r4-dm-link { color: #39FF14; text-shadow: 0 0 14px rgba(57,255,20,0.55); }
+
+/* Beat 4 — text block at bottom */
+.r4-secret-bottom {
+  position: absolute;
+  bottom: 220px; left: 0;
+  width: 1080px;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center;
+  padding: 0 60px;
+  z-index: 5;
+}
+.r4-secret-bottom .r4-secret-num {
+  font-size: 150px;
+  margin-bottom: 8px;
+}
+.r4-secret-bottom .r4-secret-line.b { font-size: 200px; }
+
+/* Beat 5 — AI stack */
+.r4-ai-stack {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center;
+  padding: 0 70px;
+  z-index: 5;
+}
+.r4-ai-stack .r4-secret-num {
+  font-size: 180px;
+  margin-bottom: 36px;
+}
+.r4-ai-row {
+  display: flex; align-items: baseline; justify-content: center;
+  gap: 28px;
+  margin-bottom: 22px;
+  font-family: 'Anton', sans-serif;
+  text-transform: uppercase;
+  will-change: transform, opacity, filter;
+}
+.r4-ai-label {
+  font-size: 70px;
+  color: #A0A0A0;
+  letter-spacing: 0.06em;
+  min-width: 360px;
+  text-align: right;
+}
+.r4-ai-eq {
+  font-size: 80px;
+  color: #fff;
+  line-height: 0.9;
+}
+.r4-ai-tool {
+  font-size: 110px;
+  letter-spacing: 0.02em;
+  min-width: 480px;
+  text-align: left;
+}
+.r4-ai-stamp {
+  margin-top: 36px;
+  font-family: 'Anton', sans-serif;
+  font-size: 160px; line-height: 0.95;
+  letter-spacing: 0.02em;
+  color: #39FF14;
+  text-transform: uppercase;
+  will-change: transform, opacity, text-shadow, filter;
+}
+
+/* Beat 6 — CTA */
+.r4-cta {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center;
+  padding: 0 70px;
+  z-index: 5;
+}
+.r4-cta-top {
+  font-family: 'Anton', sans-serif;
+  font-size: 180px; line-height: 0.95;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #FFFFFF;
+  text-shadow: 0 6px 28px rgba(0,0,0,0.95);
+  margin-bottom: 28px;
+  will-change: transform, opacity, filter;
+}
+.r4-cta-mid {
+  font-family: 'Anton', sans-serif;
+  font-size: 220px; line-height: 0.9;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+  will-change: transform, opacity, text-shadow, filter;
+}
+.r4-cta-foot {
+  margin-top: 36px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 800;
+  font-size: 42px;
+  letter-spacing: 0.08em;
+  color: #FFFFFF;
+  text-transform: uppercase;
+  will-change: transform, opacity;
+}

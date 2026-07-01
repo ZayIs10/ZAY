@@ -14,6 +14,52 @@ carousel should follow.
 
 ---
 
+## 0. TUTORIAL IS THE LOCKED DEFAULT — use it for EVERY carousel (user lock 2026-06-27)
+
+The user approved a specific deck and said: *"save this format so whenever I ask
+you to create a carousel post you would use this format."* So **tutorial is the
+default for every carousel**, in code AND in how the assistant builds one:
+
+- `choose_format()` returns **tutorial** for any topic that is not an
+  unmistakable numbered round-up (→ listicle) or pure breaking news with no
+  how-to angle (→ news_hybrid). A news-y topic gets *reframed as a how-to*, not
+  reported. Override only with an explicit `--format` / Sheet `Format` column.
+- **The golden reference deck** (the look the user signed off on):
+  `assets/carousels/build_an_app_with_no_code_using_claude_c/` — topic
+  *"Build an App With No Code Using Claude Code."* Slide order, hook style, neon
+  key word, numbered chips, recap, and CTA in that deck = the bar every future
+  carousel must hit. Its spec is the worked example of this whole doc.
+- **The locked slide order (never reorder, never drop recap):**
+  `cover ("outcome in X steps") → STEP 1..N (one action each) → PRO TIP →
+  recap (the SAVE engine, REQUIRED) → CTA (specific value, never bare "follow")`.
+- **Content must be TRUE.** Real steps for the real tool (the Claude-Code deck
+  was corrected from an invented click-UI to the real CLI flow before render).
+  No invented buttons, menus, stats, or quotes — this is the teach-a-skill brand.
+
+This block is the contract. The slide-by-slide detail below is how to satisfy it.
+
+### Delivery rule — REVIEW ONLY, never auto-post to Instagram (user lock 2026-06-27)
+
+Every carousel the assistant builds STOPS at review. The pipeline's last step is
+the review gate (`carousel_review.review_gate`), which does exactly three things
+and nothing more:
+
+1. **Render** the slide PNGs.
+2. **Upload the deck folder to Google Drive** and return ONE shareable folder
+   link (every slide + `caption.txt` inside).
+3. **Email** the user that Drive link + the copy-paste-ready caption, and mark
+   the Sheet row **"Ready to Post."**
+
+It does **NOT** post to Instagram, does NOT create an IG draft/container, and
+makes NO Graph-API call — there is intentionally no publish code in the carousel
+path. Instagram only ever happens later, manually, when the USER flips the row to
+**"Approved to Post."** When a build runs locally (where the Gmail app password
+isn't available), fire `.github/workflows/send_carousel_review.yml` to send the
+same review email from the cloud. Drive auth = the user's OAuth token
+(`google_drive_token.json`); never the service account (no storage quota).
+
+---
+
 ## 1. The fixed canvas (non-negotiable)
 
 | Property | Value | Where |

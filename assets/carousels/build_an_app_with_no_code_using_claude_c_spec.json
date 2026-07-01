@@ -1,0 +1,118 @@
+{
+  "topic": "Build an App With No Code Using Claude Code",
+  "format": "tutorial",
+  "caption": {
+    "hook": "Build a working app without writing a single line of code.",
+    "summary": "Claude Code is an AI that lives in your terminal. You describe the app in plain English and it writes, runs, and fixes the code for you. Here's the exact 4-step flow.",
+    "content": "• Install Claude Code with one command\n• Open it inside an empty project folder\n• Describe the app you want in plain English\n• Tell it to run the app and fix any errors",
+    "cta": "Save this + follow @genzcapital for daily AI tools & how-tos. No fluff. No hype.",
+    "hashtags": [
+      "#ai",
+      "#aitools",
+      "#aitips",
+      "#artificialintelligence",
+      "#genzcapital"
+    ]
+  },
+  "slides": [
+    {
+      "type": "cover",
+      "kicker": "AI HOW-TO",
+      "headline": "Create an app in 4 steps",
+      "neon_word": "app",
+      "media_keywords": [
+        "build_an_app_with_no_code_using_claude_c_1",
+        "technology"
+      ],
+      "subheadline": "BUILD A FUNCTIONAL APP WITHOUT CODING",
+      "counter_value": "4",
+      "counter_label": "STEPS"
+    },
+    {
+      "type": "content",
+      "kicker": "STEP 1",
+      "headline": "Install Claude Code",
+      "neon_word": "Install",
+      "media_keywords": [
+        "build_an_app_with_no_code_using_claude_c_2",
+        "terminal"
+      ],
+      "body": "Open your terminal and run: npm install -g @anthropic-ai/claude-code. One command, no setup.",
+      "ref_query": "developer terminal command line dark",
+      "source": ""
+    },
+    {
+      "type": "content",
+      "kicker": "STEP 2",
+      "headline": "Open it in your folder",
+      "neon_word": "folder",
+      "media_keywords": [
+        "build_an_app_with_no_code_using_claude_c_3",
+        "folder"
+      ],
+      "body": "Make an empty folder for your app, then type 'claude' inside it. The AI now works in that folder.",
+      "ref_query": "code editor project folder dark theme",
+      "source": ""
+    },
+    {
+      "type": "content",
+      "kicker": "STEP 3",
+      "headline": "Describe your app",
+      "neon_word": "Describe",
+      "media_keywords": [
+        "build_an_app_with_no_code_using_claude_c_4",
+        "chat"
+      ],
+      "body": "Type what you want in plain English: 'Build a to-do list web app.' It writes every file for you.",
+      "ref_query": "person typing laptop ai chat",
+      "source": ""
+    },
+    {
+      "type": "content",
+      "kicker": "STEP 4",
+      "headline": "Run it and fix bugs",
+      "neon_word": "Run",
+      "media_keywords": [
+        "build_an_app_with_no_code_using_claude_c_5",
+        "screen"
+      ],
+      "body": "Say 'run the app.' If anything breaks, say 'fix the error' and it patches the code itself.",
+      "ref_query": "app running on screen success",
+      "source": ""
+    },
+    {
+      "type": "content",
+      "kicker": "PRO TIP",
+      "headline": "Be specific to get more",
+      "neon_word": "specific",
+      "media_keywords": [
+        "build_an_app_with_no_code_using_claude_c_6",
+        "idea"
+      ],
+      "body": "Add details like colors, pages, and features in your request. The clearer the ask, the better the app.",
+      "ref_query": "lightbulb idea creative tech",
+      "source": ""
+    },
+    {
+      "type": "recap",
+      "headline": "What you just learned",
+      "neon_word": "learned",
+      "points": [
+        "Install Claude Code (one command)",
+        "Open it in an empty folder",
+        "Describe the app in plain English",
+        "Run it and let it fix its own bugs"
+      ]
+    },
+    {
+      "type": "cta",
+      "headline": "I find these so you don't have to",
+      "neon_word": "you",
+      "pills": [
+        "ONE USABLE AI SKILL A DAY",
+        "FRONTIER AI, EXPLAINED SIMPLY",
+        "NO FLUFF. NO HYPE."
+      ]
+    }
+  ]
+}

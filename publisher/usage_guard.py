@@ -6,6 +6,39 @@ from datetime import datetime
 from typing import Any
 
 
+def _env_float(name: str, default: float) -> float:
+    """Read a float env var, falling back to `default` when the var is missing,
+    empty, or whitespace-only.
+
+    os.getenv(name, "<default>") only kicks in when the var is ABSENT. In CI the
+    var is often PRESENT but empty (e.g. `OPENAI_DAILY_BUDGET_USD=` written from
+    an unset GitHub secret), and float("") raises ValueError. This treats empty
+    as "use the default" and ignores a bad value rather than crashing the run.
+    """
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return float(raw.strip())
+    except (TypeError, ValueError):
+        logging.warning(
+            "%s=%r is not a number; using default %s", name, raw, default)
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    """Integer sibling of _env_float — empty/invalid env value -> default."""
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return int(float(raw.strip()))
+    except (TypeError, ValueError):
+        logging.warning(
+            "%s=%r is not an integer; using default %s", name, raw, default)
+        return default
+
+
 @dataclass
 class UsageSnapshot:
     daily_usd: float
@@ -55,21 +88,16 @@ class UsageGuard:
         state_path = os.path.join(logs_dir, "usage_state.json")
         return cls(
             state_path=state_path,
-            daily_budget_usd=float(os.getenv("OPENAI_DAILY_BUDGET_USD", "10")),
-            monthly_budget_usd=float(
-                os.getenv("OPENAI_MONTHLY_BUDGET_USD", "200")),
-            run_budget_usd=float(os.getenv("OPENAI_RUN_BUDGET_USD", "2")),
-            max_requests_per_run=int(
-                os.getenv("OPENAI_MAX_REQUESTS_PER_RUN", "25")),
-            max_tokens_per_run=int(
-                os.getenv("OPENAI_MAX_TOKENS_PER_RUN", "100000")),
-            input_cost_per_1m=float(
-                os.getenv("OPENAI_INPUT_COST_PER_1M_USD", "5")),
-            output_cost_per_1m=float(
-                os.getenv("OPENAI_OUTPUT_COST_PER_1M_USD", "15")),
-            image_standard_cost=float(
-                os.getenv("OPENAI_IMAGE_STANDARD_COST_USD", "0.04")),
-            image_hd_cost=float(os.getenv("OPENAI_IMAGE_HD_COST_USD", "0.08")),
+            daily_budget_usd=_env_float("OPENAI_DAILY_BUDGET_USD", 10.0),
+            monthly_budget_usd=_env_float("OPENAI_MONTHLY_BUDGET_USD", 200.0),
+            run_budget_usd=_env_float("OPENAI_RUN_BUDGET_USD", 2.0),
+            max_requests_per_run=_env_int("OPENAI_MAX_REQUESTS_PER_RUN", 25),
+            max_tokens_per_run=_env_int("OPENAI_MAX_TOKENS_PER_RUN", 100000),
+            input_cost_per_1m=_env_float("OPENAI_INPUT_COST_PER_1M_USD", 5.0),
+            output_cost_per_1m=_env_float("OPENAI_OUTPUT_COST_PER_1M_USD", 15.0),
+            image_standard_cost=_env_float(
+                "OPENAI_IMAGE_STANDARD_COST_USD", 0.04),
+            image_hd_cost=_env_float("OPENAI_IMAGE_HD_COST_USD", 0.08),
         )
 
     def _load_state(self) -> dict[str, Any]:

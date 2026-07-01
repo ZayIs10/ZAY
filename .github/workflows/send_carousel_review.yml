@@ -1,0 +1,140 @@
+name: Send Carousel Review Email
+
+# Notification-only helper. Sends the carousel REVIEW email (Drive link +
+# copy-paste caption) for a deck that is ALREADY rendered + uploaded to Drive.
+#
+# Why this exists: the image build runs locally sometimes (to eyeball slides
+# before spending in the cloud), but the Gmail SMTP app password lives ONLY in
+# GitHub Secrets — never on the laptop. So after a local build + manual Drive
+# upload, fire this to get the same review email the cloud pipeline would send.
+#
+# It does NO image generation and spends NOTHING — it only emails. Safe to run
+# any time you have a Drive folder URL for a finished deck.
+#
+# Manual run (Actions UI) or repository_dispatch:
+#   POST https://api.github.com/repos/<owner>/<repo>/dispatches
+#   { "event_type": "send-carousel-review",
+#     "client_payload": {
+#       "topic": "Build an App With No Code Using Claude Code",
+#       "drive_url": "https://drive.google.com/drive/folders/XXXX",
+#       "n_slides": "8",
+#       "caption": "....full caption text...."   # optional; see below
+#     } }
+# If `caption` is omitted, it reads assets/carousels/<deck_dir>/caption.txt
+# when `deck_dir` is given instead.
+
+on:
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: "Topic EXACTLY as it appears in the Sheet (used in the subject + to mark the row)."
+        required: true
+      drive_url:
+        description: "The Drive FOLDER url of the finished deck."
+        required: true
+      caption:
+        description: "Full caption text (incl. hashtags). Leave blank to read caption.txt from deck_dir."
+        required: false
+        default: ""
+      deck_dir:
+        description: "Deck folder name under assets/carousels/ (used to read caption.txt if caption is blank)."
+        required: false
+        default: ""
+      n_slides:
+        description: "How many slides to mention in the email."
+        required: false
+        default: "8"
+      mark_ready:
+        description: "Also set the Sheet row Status -> 'Ready to Post' (+ Drive URL)."
+        type: boolean
+        default: false
+
+jobs:
+  send-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      GOOGLE_SHEET_ID:    ${{ secrets.GOOGLE_SHEET_ID }}
+      GMAIL_ADDRESS:      ${{ secrets.GMAIL_ADDRESS }}
+      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+      NOTIFY_TO:          ${{ secrets.NOTIFY_TO }}
+      TOPIC:      ${{ github.event.inputs.topic    || github.event.client_payload.topic }}
+      DRIVE_URL:  ${{ github.event.inputs.drive_url || github.event.client_payload.drive_url }}
+      CAPTION_IN: ${{ github.event.inputs.caption  || github.event.client_payload.caption }}
+      DECK_DIR:   ${{ github.event.inputs.deck_dir || github.event.client_payload.deck_dir }}
+      N_SLIDES:   ${{ github.event.inputs.n_slides || github.event.client_payload.n_slides }}
+      MARK_READY: ${{ github.event.inputs.mark_ready || github.event.client_payload.mark_ready }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write .env
+        run: |
+          printf "GOOGLE_SHEET_ID=%s\n" "$GOOGLE_SHEET_ID" >> .env
+          true
+
+      - name: Write Google service account (for the optional Sheet mark)
+        run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > google_service_account.json
+
+      - name: Send review email
+        run: |
+          set -o pipefail
+          mkdir -p logs
+          python - <<'PY' 2>&1 | tee logs/carousel_review_email.log
+          import os
+          from pathlib import Path
+          from publisher.carousel_review import (
+              send_review_email, update_sheet_status, DONE_STATUS)
+
+          topic = (os.environ.get("TOPIC") or "").strip()
+          drive_url = (os.environ.get("DRIVE_URL") or "").strip()
+          caption = os.environ.get("CAPTION_IN") or ""
+          deck_dir = (os.environ.get("DECK_DIR") or "").strip()
+          try:
+              n_slides = int(os.environ.get("N_SLIDES") or "8")
+          except ValueError:
+              n_slides = 8
+
+          if not topic or not drive_url:
+              raise SystemExit("topic and drive_url are required.")
+
+          # Fall back to the deck's caption.txt if no caption was passed in.
+          if not caption.strip() and deck_dir:
+              cap_path = Path("assets/carousels") / deck_dir / "caption.txt"
+              if cap_path.exists():
+                  caption = cap_path.read_text(encoding="utf-8")
+                  print(f"Loaded caption from {cap_path}")
+
+          emailed = send_review_email(
+              topic=topic, caption=caption, folder_url=drive_url,
+              n_slides=n_slides)
+          print("EMAILED:", emailed)
+
+          if (os.environ.get("MARK_READY") or "").strip().lower() == "true":
+              ok = update_sheet_status(topic, DONE_STATUS, drive_url)
+              print("SHEET_MARKED_READY:", ok)
+
+          if not emailed:
+              raise SystemExit(
+                  "Email was not sent (check GMAIL_ADDRESS / "
+                  "GMAIL_APP_PASSWORD secrets).")
+          PY
+
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: carousel-review-email-${{ github.run_id }}
+          path: logs/
+          retention-days: 14

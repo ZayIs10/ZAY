@@ -10,8 +10,10 @@ only works for Facebook Pages, not IG.)
 So GitHub does the scheduling instead. The reel build renders the video, uploads
 it to Drive, and leaves the row at Status="Ready to Post". This script is run by
 a daily GitHub Actions cron at 12:00 UTC = 8:00 PM SGT (the peak SG/MY evening
-window). It finds every "Ready to Post" row and publishes it NOW — so from the
-user's side, reels queue up whenever they render and go live at 8pm SGT.
+window). By DEFAULT it publishes ONE due reel per run = one post per day. If
+several reels are queued they drain one-per-day on the following days — so from
+the user's side, reels queue up whenever they render and go live at 8pm SGT, at
+most one per day. (Pass --limit 0 to publish every due reel in a single run.)
 
 WHY IT RE-CREATES THE CONTAINER
 -------------------------------
@@ -23,9 +25,9 @@ expired, we re-create a fresh container from the Drive MP4 URL (column
 idempotent: a row already "Published" is skipped.
 
 Run:
-    python publisher/publish_due_reels.py            # publish all due reels
+    python publisher/publish_due_reels.py            # publish ONE due reel (the default)
     python publisher/publish_due_reels.py --dry-run  # list due reels, post nothing
-    python publisher/publish_due_reels.py --limit 3  # cap how many go out
+    python publisher/publish_due_reels.py --limit 0  # no cap — publish ALL due reels
 """
 
 from __future__ import annotations
@@ -167,8 +169,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true",
                         help="List due reels but publish nothing.")
-    parser.add_argument("--limit", type=int, default=0,
-                        help="Max reels to publish this run (0 = no cap).")
+    parser.add_argument("--limit", type=int, default=1,
+                        help="Max reels to publish this run. Default 1 = one post "
+                             "per day; pass 0 for no cap (publish all due reels).")
     args = parser.parse_args()
 
     load_dotenv(REPO_ROOT / ".env")

@@ -91,28 +91,24 @@ def build_review_email(
     `caption` is the full Post Caption from the sheet — it already includes
     the hashtags, so it's sent verbatim as one copy-paste-ready block.
 
-    The reel build no longer publishes to Instagram itself (the IG API can't
-    truly schedule — sending scheduled_publish_time is silently ignored and the
-    post goes out instantly). Instead the row is left at Status="Ready to Post"
-    and a daily GitHub cron publishes it at 8pm SGT — the peak SG/MY window.
-    So this email tells the user the reel is QUEUED for 8pm SGT, with the Drive
-    link to post sooner if they want. (`staged_ok` / `stage_detail` /
-    `container_id` / `repo` are kept for signature compatibility but unused.)
+    AUTO-PUBLISH IS DISABLED (2026-06-29, by user request). The build renders
+    the reel, uploads it to Drive, and emails this review link — but NOTHING
+    posts to Instagram automatically. The user reviews the reel (and can add
+    anything before it goes out) and posts it manually from the Drive link.
+    (`staged_ok` / `stage_detail` / `container_id` / `repo` are kept for
+    signature compatibility but unused.)
     """
-    subject = f"[GenZ reel queued — auto-posts 8pm SGT] {topic}"
+    subject = f"[GenZ reel ready to review — post manually] {topic}"
 
     caption_block = caption.strip() or "(no caption in sheet)"
 
     ig_block = (
-        "INSTAGRAM: QUEUED — AUTO-PUBLISHES AT 8PM SGT\n"
+        "INSTAGRAM: NOT POSTED — REVIEW + POST MANUALLY\n"
         "------------------------------------------------------------\n"
-        "This reel is queued (Status = 'Ready to Post'). A scheduled job\n"
-        "publishes it automatically at the next 8:00 PM SGT — the peak\n"
-        "Singapore/Malaysia evening window — with the caption below.\n\n"
-        "  * Want it out sooner? Download from the Drive link above and\n"
-        "    post it manually now.\n"
-        "  * Don't want it posted? Open the sheet and change this row's\n"
-        "    Status away from 'Ready to Post' before 8pm SGT.\n"
+        "This reel is rendered and waiting for you. Auto-publishing is\n"
+        "OFF — nothing goes to Instagram on its own. When you're happy\n"
+        "with it (add anything you want first), download it from the\n"
+        "Drive link above and post it manually with the caption below.\n"
     )
 
     body = (

@@ -6,7 +6,7 @@ google-auth==2.29.0
 google-auth-oauthlib==1.2.0
 google-api-python-client==2.131.0
 python-dotenv==1.0.1
-Pillow==10.3.0
+Pillow>=11.0.0
 schedule==1.2.1
 feedparser==6.0.12
 pytrends==4.9.2

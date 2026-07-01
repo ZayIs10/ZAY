@@ -21,9 +21,14 @@ import time
 import requests
 from openai import OpenAI
 
-from post_generator import (ImageGenerator, ImageProcessor,
-                             ImageUploader, build_dalle_prompt)
-from usage_guard import UsageGuard
+try:  # repo-root module run (CI / n8n / pipeline)
+    from publisher.post_generator import (ImageGenerator, ImageProcessor,
+                                          ImageUploader, build_dalle_prompt)
+    from publisher.usage_guard import UsageGuard
+except ModuleNotFoundError:  # run directly from inside publisher/
+    from post_generator import (ImageGenerator, ImageProcessor,
+                                ImageUploader, build_dalle_prompt)
+    from usage_guard import UsageGuard
 
 
 def _strip_urls(text: str) -> str:

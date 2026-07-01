@@ -12,6 +12,19 @@ name: Build Tweet-Card Reel
 #   }
 #
 # Also runnable manually from the GitHub Actions UI (specify row_index).
+#
+# RUNS IN GITHUB'S CLOUD (ubuntu-latest) — the user's PC can stay OFF.
+# Why this works now: YouTube permanently bot-blocks datacenter IPs (GitHub
+# Actions) with "Sign in to confirm you're not a bot". We get past it by routing
+# the yt-dlp download through a DataImpulse RESIDENTIAL proxy (secret PROXY_URL),
+# which gives the request a residential IP YouTube trusts. Pay-as-you-go (~$1/GB);
+# the build only downloads the used section of each clip (~a few MB, ~1c/run).
+#
+# Fallback: if PROXY_URL is ever unset, the download falls back to the cookieless
+# clients (which fail from a datacenter IP) — so keep the secret set. The old
+# self-hosted-PC runner remains a valid alternative if you ever drop the proxy
+# (set runs-on back to [self-hosted, windows, genz-pc] and use the pwsh steps in
+# git history).
 
 on:
   repository_dispatch:
@@ -30,16 +43,17 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
 
     env:
       GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
       GOOGLE_SHEET_REELS_NAME: Reels
       YOUTUBE_COOKIES_FILE: youtube_cookies.txt
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-      # Residential proxy (DataImpulse) — the load-bearing secret that lets this
+      # Residential proxy (DataImpulse) — the load-bearing secret that lets the
       # CLOUD runner download YouTube clips despite datacenter IPs being
-      # bot-blocked. media_consumer routes yt-dlp through it. Laptop can stay OFF.
+      # bot-blocked. Built from the DataImpulse login:password@host:port;
+      # media_consumer routes yt-dlp through it. Laptop can stay OFF.
       PROXY_URL: ${{ secrets.PROXY_URL }}
       # Instagram staging (upload + process the reel; the user taps Publish).
       # If unset the build still succeeds — it skips IG staging and the review
@@ -62,32 +76,36 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Install ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
-
-      - name: Install Deno (JS runtime for yt-dlp YouTube challenge solver)
-        # YouTube gates real format URLs behind a JS "n challenge" that
-        # yt-dlp solves via a JS runtime + the EJS solver. Without Deno,
-        # only storyboard images are available and the build fails.
+      - name: Install ffmpeg + Deno
+        # ffmpeg: full build from apt supports -crf (the stripped builds don't).
+        # Deno: yt-dlp's JS runtime for the YouTube "n challenge" solver.
         run: |
-          curl -fsSL https://deno.land/install.sh | sh -s -- -y
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          curl -fsSL https://deno.land/install.sh | sh
           echo "$HOME/.deno/bin" >> "$GITHUB_PATH"
-
-      - name: Verify Deno
-        run: deno --version
 
       - name: Install Python dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install yt-dlp
 
+      - name: Verify tools
+        run: |
+          python --version
+          ffmpeg -version | head -1
+          deno --version | head -1 || echo "::warning::deno not found (yt-dlp JS solver may degrade)"
+
       - name: Write .env
         run: |
-          printf "GOOGLE_SHEET_ID=%s\n" "$GOOGLE_SHEET_ID" >> .env
-          printf "GOOGLE_SHEET_REELS_NAME=%s\n" "$GOOGLE_SHEET_REELS_NAME" >> .env
-          printf "YOUTUBE_API_KEY=%s\n" "$YOUTUBE_API_KEY" >> .env
-          [ -n "$PROXY_URL" ] && printf "PROXY_URL=%s\n" "$PROXY_URL" >> .env
-          true
+          {
+            printf "GOOGLE_SHEET_ID=%s\n" "$GOOGLE_SHEET_ID"
+            printf "GOOGLE_SHEET_REELS_NAME=%s\n" "$GOOGLE_SHEET_REELS_NAME"
+            printf "YOUTUBE_API_KEY=%s\n" "$YOUTUBE_API_KEY"
+            [ -n "$PROXY_URL" ] && printf "PROXY_URL=%s\n" "$PROXY_URL"
+            true
+          } > .env
 
       - name: Write Google service account
         run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > google_service_account.json
@@ -95,21 +113,23 @@ jobs:
       - name: Write Drive OAuth token
         # Pre-authorized token JSON (run publish_reel.py locally once to mint it,
         # then copy the contents of google_drive_token.json into this secret).
-        run: echo '${{ secrets.GOOGLE_DRIVE_TOKEN_JSON }}' > google_drive_token.json
+        run: |
+          if [ -n '${{ secrets.GOOGLE_DRIVE_TOKEN_JSON }}' ]; then
+            echo '${{ secrets.GOOGLE_DRIVE_TOKEN_JSON }}' > google_drive_token.json
+          fi
 
-      - name: Write YouTube cookies
-        # Netscape-format cookies so yt-dlp can fetch YouTube from GitHub's
-        # datacenter IP (otherwise: "Sign in to confirm you're not a bot").
-        # Export once with a browser extension, paste into the YOUTUBE_COOKIES
-        # secret. Skips silently if the secret is unset.
+      - name: Write YouTube cookies (OPTIONAL — proxy + cookieless is the default)
+        # Downloads use cookieless YouTube player clients through the residential
+        # proxy, so login cookies are NOT required. If the secret IS present we
+        # still write it as a bonus for rare age-gated clips; empty is normal.
         env:
           YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
         run: |
-          if [ -n "$YOUTUBE_COOKIES" ]; then
-            printf '%s\n' "$YOUTUBE_COOKIES" > youtube_cookies.txt
-            echo "Wrote youtube_cookies.txt ($(wc -l < youtube_cookies.txt) lines)"
+          if [ -z "$YOUTUBE_COOKIES" ]; then
+            echo "::notice::No YOUTUBE_COOKIES secret — using cookieless clients through the proxy (the normal path)."
           else
-            echo "::warning::YOUTUBE_COOKIES secret not set — YouTube downloads may be bot-blocked."
+            printf '%s' "$YOUTUBE_COOKIES" > youtube_cookies.txt
+            echo "Wrote youtube_cookies.txt ($(wc -l < youtube_cookies.txt) lines) — used as a bonus backup."
           fi
 
       - name: Resolve target (topic preferred, row_index fallback)
@@ -136,25 +156,16 @@ jobs:
 
       - name: Build reel
         env:
-          # Pass the topic through the ENV, not inline ${{ }} interpolation.
-          # GitHub substitutes ${{ }} into the script as literal text BEFORE
-          # bash runs, so a topic containing "$1" (e.g. "Worth Almost $1
-          # Trillion") would be eaten by the shell as a positional parameter —
-          # the exact bug that made the topic arrive as "Almost  Trillion" and
-          # match no row. A double-quoted env var is never re-expanded, so the
-          # "$1" survives intact.
           TOPIC: ${{ steps.target.outputs.topic }}
           ROW: ${{ steps.target.outputs.row }}
           MODE: ${{ steps.target.outputs.mode }}
         run: |
-          set -o pipefail   # fail the step if python fails, not just tee
+          set -o pipefail
           mkdir -p logs renders
           if [ "$MODE" = "topic" ]; then
-            python publisher/tweet_card_reel.py --topic "$TOPIC" 2>&1 \
-              | tee "logs/tweet_card_reel.log"
+            python publisher/tweet_card_reel.py --topic "$TOPIC" 2>&1 | tee "logs/tweet_card_reel.log"
           else
-            python publisher/tweet_card_reel.py --row "$ROW" 2>&1 \
-              | tee "logs/tweet_card_reel_row${ROW}.log"
+            python publisher/tweet_card_reel.py --row "$ROW" 2>&1 | tee "logs/tweet_card_reel_row${ROW}.log"
           fi
 
       - name: Upload logs

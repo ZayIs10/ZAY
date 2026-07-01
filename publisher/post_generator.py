@@ -24,7 +24,10 @@ from dotenv import load_dotenv
 from google.oauth2.service_account import Credentials
 from openai import OpenAI
 from PIL import Image, ImageDraw, ImageFont
-from usage_guard import UsageGuard, UsageLimitError
+try:  # works when run as a module from the repo root (CI / n8n / pipeline)
+    from publisher.usage_guard import UsageGuard, UsageLimitError
+except ModuleNotFoundError:  # works when run directly from inside publisher/
+    from usage_guard import UsageGuard, UsageLimitError
 
 load_dotenv()
 

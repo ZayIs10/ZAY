@@ -7,22 +7,10 @@
     "doc": "docs"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "reels:doctor": "node scripts/with-ffmpeg.js hyperframes doctor",
-    "reels:preview": "node scripts/with-ffmpeg.js hyperframes preview --project reels",
-    "reels:render": "node scripts/with-ffmpeg.js hyperframes render reels --workers 2",
-    "reels:lint": "node scripts/with-ffmpeg.js hyperframes lint --project reels"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
-  "dependencies": {
-    "playwright": "^1.59.1"
-  },
-  "devDependencies": {
-    "@ffmpeg-installer/ffmpeg": "^1.1.0",
-    "@ffprobe-installer/ffprobe": "^2.1.2",
-    "hyperframes": "^0.4.31"
-  }
+  "type": "commonjs"
 }
