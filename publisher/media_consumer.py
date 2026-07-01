@@ -127,7 +127,11 @@ def _http_download(url: str, dest: Path) -> None:
 #                    when every HD-capable client is bot-blocked.
 # `web` bot-blocks the most, so it's cookies-only. See yt-dlp wiki:
 # Extractors#youtube player_client.
-_YT_CLIENTS_COOKIELESS = ("web_safari", "tv_embedded", "tv", "ios",
+# tv_embedded FIRST: it's the one client that serves the full HD ladder
+# reliably WITHOUT cookies (verified 2026-07-01), so the common path gets 1080p
+# on the very first attempt. web_safari only exposes HD *with* cookies (cookieless
+# it 400s "format not available"), so it's better reached via the cookie'd pass.
+_YT_CLIENTS_COOKIELESS = ("tv_embedded", "tv", "web_safari", "ios",
                           "android", "mweb")
 _YT_CLIENTS_WITH_COOKIES = ("web", "web_safari", "tv", "ios")
 
@@ -181,8 +185,14 @@ def _ytdlp_base_opts(dest: Path, section_seconds: float | None = None,
         from yt_dlp.utils import download_range_func  # type: ignore
         r0, r1 = float(section_range[0]), float(section_range[1])
         opts["download_ranges"] = download_range_func(None, [(max(0.0, r0), r1)])
-        # Ranges land on keyframes; force-keyframes keeps the cut near-exact.
-        opts["force_keyframes_at_cuts"] = True
+        # HD on YouTube is DASH-only (720p/1080p = separate video+audio streams;
+        # the only progressive/muxed format is 360p). Range-download the two DASH
+        # streams natively, then let yt-dlp merge. We do NOT set
+        # force_keyframes_at_cuts (it forces a slow full re-encode that was
+        # crashing ffmpeg on long HD clips); the range lands on a nearby keyframe
+        # and the compositor does the exact final trim, so this is fine. A small
+        # tail buffer at the call site keeps keyframe rounding from clipping the
+        # ending.
     elif section_seconds and section_seconds > 0:
         # Download only [0, section_seconds]. download_range_func lives in
         # yt_dlp.utils; import lazily so this module still loads without yt-dlp.
@@ -257,20 +267,33 @@ def _ytdlp_download(url: str, dest: Path,
 
     cookiefile = _youtube_cookiefile()
 
-    # Build the ordered list of (client, use_cookies) attempts.
-    attempts: list[tuple[str, bool]] = [
-        (c, False) for c in _YT_CLIENTS_COOKIELESS
-    ]
+    # Clients that only ever serve up to 360p on many videos — accepting one of
+    # these produces a BLURRY upscaled reel, so they must be the LAST resort,
+    # tried only after every HD-capable client (cookieless AND cookie'd) has
+    # failed. Everything else can serve the full HD ladder.
+    _LOWRES_ONLY = {"android", "mweb"}
+    hd_clients = [c for c in _YT_CLIENTS_COOKIELESS if c not in _LOWRES_ONLY]
+    lowres_clients = [c for c in _YT_CLIENTS_COOKIELESS if c in _LOWRES_ONLY]
+
+    # Attempt order (stop at first success):
+    #   1. HD-capable clients, cookieless (fast, free).
+    #   2. HD-capable clients WITH cookies — this is what gets HD past the
+    #      "confirm you're not a bot" wall that blocks the cookieless HD tries.
+    #   3. ONLY THEN the 360p-only clients — a soft reel still beats no reel.
+    attempts: list[tuple[str, bool]] = [(c, False) for c in hd_clients]
     if cookiefile:
-        log.info("YouTube cookies found (%s) — adding cookie'd clients as "
-                 "backup attempts.", cookiefile)
-        # Append cookie'd clients we haven't already tried cookieless.
+        log.info("YouTube cookies found (%s) — trying cookie'd HD clients "
+                 "before falling back to low-res.", cookiefile)
         for c in _YT_CLIENTS_WITH_COOKIES:
-            attempts.append((c, True))
+            if c not in _LOWRES_ONLY:
+                attempts.append((c, True))
     else:
-        log.info("No YouTube cookies — relying on cookieless clients "
-                 "(%s). This is expected and fine.",
-                 ", ".join(_YT_CLIENTS_COOKIELESS))
+        log.info("No YouTube cookies — relying on cookieless clients. HD may "
+                 "be bot-blocked; will fall back to low-res if needed.")
+    # Low-res last resort: cookieless first, then cookie'd.
+    attempts.extend((c, False) for c in lowres_clients)
+    if cookiefile:
+        attempts.extend((c, True) for c in lowres_clients)
 
     last_exc: Exception | None = None
     for client, use_cookies in attempts:
