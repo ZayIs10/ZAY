@@ -156,6 +156,21 @@ def _ytdlp_base_opts(dest: Path, section_seconds: float | None = None) -> dict:
         "merge_output_format": "mp4",
         "retries": 5,
         "fragment_retries": 5,
+        # Fail a hung/blocked attempt FAST. Without this a proxy-blocked HD
+        # fragment fetch hangs ~60s per client before erroring — across 5
+        # source URLs × several clients that was the ~10-minute build stall.
+        # 20s is plenty for a real fragment; a slower one just retries.
+        "socket_timeout": 20,
+        # CRITICAL for proxy mode: HD YouTube is DASH (separate video+audio
+        # fragmented streams). yt-dlp CAN hand DASH/HLS fetching to ffmpeg,
+        # but ffmpeg does NOT inherit yt-dlp's `proxy` opt — so through the
+        # residential proxy ffmpeg fetched fragments from the DATACENTER IP,
+        # got bot-blocked, and died with "ffmpeg exited with code 251" (the
+        # exact failure in the failing run). Force yt-dlp's OWN native
+        # downloader for fragments — it honours `proxy` — so every byte goes
+        # through the residential IP. `hls_prefer_native` covers HLS; leaving
+        # `external_downloader` unset keeps DASH on the native path too.
+        "hls_prefer_native": True,
         # YouTube gates real format URLs behind a JS "n challenge". yt-dlp
         # solves it with a JS runtime (Deno) + the EJS solver from GitHub.
         # Without this, only storyboard images are offered.
@@ -177,6 +192,12 @@ def _ytdlp_base_opts(dest: Path, section_seconds: float | None = None) -> dict:
     proxy = os.environ.get("PROXY_URL", "").strip()
     if proxy:
         opts["proxy"] = proxy
+        # Belt-and-suspenders: if yt-dlp ever DOES shell out to ffmpeg for a
+        # stream (e.g. an HLS-only format), hand ffmpeg the proxy explicitly so
+        # it can't leak the fetch onto the (bot-blocked) datacenter IP. The
+        # native path above is what normally runs; this just makes the ffmpeg
+        # fallback safe instead of a guaranteed exit-251.
+        opts["external_downloader_args"] = {"ffmpeg": ["-http_proxy", proxy]}
     ff = _resolve_ffmpeg()
     if ff and ff != "ffmpeg":
         # yt-dlp merges video+audio with ffmpeg; point it at the resolved
