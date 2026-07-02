@@ -357,6 +357,59 @@ def _ensure_media(reader: SheetsReader, row_index: int, row: dict,
 
 # ---------------------------------------------------------------------------
 
+def _ensure_captions(reader: SheetsReader, row_index: int, row: dict,
+                     *, dry_run: bool) -> dict:
+    """If the row has no Reel Caption AND no Post Caption, generate BOTH here
+    (free, no OpenAI) from Topic + Key Points, grounded in the source video's
+    transcript when a YouTube/Media video URL is present, then write them back.
+
+    This is what lets a topic be seeded with just Topic + Status='Ready to Run':
+    the build self-fills the captions the same way it self-finds the media.
+    No-op when either caption is already present (never overwrites the user's
+    hand-written copy)."""
+    reel_cap = (row.get("Reel Caption") or "").strip()
+    post_cap = (row.get("Post Caption") or "").strip()
+    if reel_cap and post_cap:
+        return row  # both already there — respect hand-written copy
+
+    topic = (row.get("Topic") or "").strip()
+    if not topic:
+        return row  # nothing to build from; validation will catch it
+
+    key_points = (row.get("Key Points") or "").strip()
+
+    # Ground in real spoken content when the row points at a video. Prefer the
+    # hand-picked YouTube URL; fall back to whatever media the finder chose.
+    transcript = ""
+    video_url = (row.get("YouTube URL") or row.get("Media Video URL") or "").strip()
+    if video_url:
+        try:
+            from publisher.media_sources.transcript_picker import fetch_transcript
+            transcript = fetch_transcript(video_url, max_chars=4000)
+        except Exception as exc:  # noqa: BLE001 — transcript is best-effort
+            log.warning("Transcript fetch failed for row %d (%s); "
+                        "captions will use Topic + Key Points only.",
+                        row_index, exc)
+
+    log.info("Captions missing on row %d — generating (free)%s...",
+             row_index, " with transcript" if transcript else "")
+
+    from publisher.caption_builder import build_captions
+    caps = build_captions(topic, key_points, transcript)
+
+    # Only fill the columns that were actually blank.
+    if not reel_cap:
+        row["Reel Caption"] = caps["reel_caption"]
+        if not dry_run:
+            _try_update(reader, row_index, "Reel Caption", caps["reel_caption"])
+    if not post_cap:
+        row["Post Caption"] = caps["post_caption"]
+        if not dry_run:
+            _try_update(reader, row_index, "Post Caption", caps["post_caption"])
+
+    return row
+
+
 def build_reel_for_row(row: dict) -> Path:
     """Pure build step — no Sheet I/O. Returns the local mp4 path.
 
@@ -578,6 +631,14 @@ def run(row_index: int | None, *, topic: str | None = None, dry_run: bool) -> in
     # render time, so a missing Media Image URL never triggers a re-search.
     if not row.get("Media Video URL", "").strip():
         row = _ensure_media(reader, row_index, row, dry_run=dry_run)
+
+    # Self-serve captions: if the row was seeded bare (Topic + "Ready to Run"
+    # only), generate the Reel Caption + Post Caption here (free, no OpenAI),
+    # grounded in the source video's transcript when there is one. Runs AFTER
+    # media so even an auto-found clip can ground the copy. This is why the
+    # "missing required fields: Reel Caption / Post Caption" error no longer
+    # stops a bare row from building.
+    row = _ensure_captions(reader, row_index, row, dry_run=dry_run)
 
     # Hard rule: no real video clip -> SKIP the post (don't ship a still,
     # don't mark it Failed). Routes to the terminal SKIPPED_STATUS below.
