@@ -161,43 +161,53 @@ def _ytdlp_base_opts(dest: Path, section_seconds: float | None = None) -> dict:
         # source URLs × several clients that was the ~10-minute build stall.
         # 20s is plenty for a real fragment; a slower one just retries.
         "socket_timeout": 20,
-        # CRITICAL for proxy mode: HD YouTube is DASH (separate video+audio
-        # fragmented streams). yt-dlp CAN hand DASH/HLS fetching to ffmpeg,
-        # but ffmpeg does NOT inherit yt-dlp's `proxy` opt — so through the
-        # residential proxy ffmpeg fetched fragments from the DATACENTER IP,
-        # got bot-blocked, and died with "ffmpeg exited with code 251" (the
-        # exact failure in the failing run). Force yt-dlp's OWN native
-        # downloader for fragments — it honours `proxy` — so every byte goes
-        # through the residential IP. `hls_prefer_native` covers HLS; leaving
-        # `external_downloader` unset keeps DASH on the native path too.
         "hls_prefer_native": True,
         # YouTube gates real format URLs behind a JS "n challenge". yt-dlp
         # solves it with a JS runtime (Deno) + the EJS solver from GitHub.
         # Without this, only storyboard images are offered.
         "remote_components": ["ejs:github"],
     }
-    if section_seconds and section_seconds > 0:
-        # Download only [0, section_seconds]. download_range_func lives in
-        # yt_dlp.utils; import lazily so this module still loads without yt-dlp.
+    proxy = os.environ.get("PROXY_URL", "").strip()
+
+    # ---- THE exit-251 FIX (root cause PROVEN, not guessed) -----------------
+    # `download_ranges` (fetch only the first N seconds) makes yt-dlp hand the
+    # download to ffmpeg (FFmpegFD) — verified: FFmpegFD.real_download fires
+    # even on a plain progressive stream when a range is set. That ffmpeg
+    # subprocess fetches the media URL over HTTPS ITSELF and ignores yt-dlp's
+    # `proxy` opt (ffmpeg's -http_proxy doesn't cover HTTPS either). On the
+    # cloud runner it therefore hit YouTube from the bot-blocked DATACENTER IP,
+    # the connection reset, and ffmpeg died: "ffmpeg exited with code 251" —
+    # every source URL, ~60s each = the reels getting "Skipped - No Video".
+    #
+    # Fix: under the proxy, DON'T set download_ranges. yt-dlp then downloads the
+    # whole clip with its NATIVE downloader (verified used_ffmpeg_fetch=False),
+    # which honours `proxy`, so every byte goes through the residential IP. The
+    # sources are short talking-head clips (~5-6 MB whole, ~0.6c at ~$1/GB) and
+    # the compositor already trims to the used opening, so this costs pennies
+    # and is bulletproof. Any HD DASH pair still merges from LOCAL files (no
+    # network), so it stays proxy-safe too.
+    if proxy:
+        pass  # deliberately no download_ranges — see above
+    elif section_seconds and section_seconds > 0:
+        # No proxy (self-hosted PC / free path): the native downloader CAN honour
+        # ranges here because it isn't fighting a proxy, so keep the bandwidth
+        # saving. download_range_func lives in yt_dlp.utils; import lazily so
+        # this module still loads without yt-dlp.
         from yt_dlp.utils import download_range_func  # type: ignore
         opts["download_ranges"] = download_range_func(
             None, [(0.0, float(section_seconds))])
+
     # Residential proxy (DataImpulse). When PROXY_URL is set, route every
     # download through it so the build can run on GitHub's CLOUD runners — whose
     # datacenter IPs YouTube permanently bot-blocks — with the user's PC OFF.
-    # The proxy gives the request a residential IP YouTube trusts. Pay-as-you-go
-    # (~$1/GB); the section-download above keeps each clip to a few MB (~1c/run).
-    # When PROXY_URL is UNSET behaviour is identical to before, so the
-    # self-hosted-PC path still works unchanged as a free fallback.
-    proxy = os.environ.get("PROXY_URL", "").strip()
     if proxy:
         opts["proxy"] = proxy
-        # Belt-and-suspenders: if yt-dlp ever DOES shell out to ffmpeg for a
-        # stream (e.g. an HLS-only format), hand ffmpeg the proxy explicitly so
-        # it can't leak the fetch onto the (bot-blocked) datacenter IP. The
-        # native path above is what normally runs; this just makes the ffmpeg
-        # fallback safe instead of a guaranteed exit-251.
-        opts["external_downloader_args"] = {"ffmpeg": ["-http_proxy", proxy]}
+        # Backstop for the merge step: if a DASH pair IS used, the ffmpeg merge
+        # only touches LOCAL files (no network), so it can't leak — but export
+        # http(s)_proxy in the environment too so any ffmpeg network op that
+        # ever does happen is covered for HTTPS (which -http_proxy is not).
+        os.environ.setdefault("http_proxy", proxy)
+        os.environ.setdefault("https_proxy", proxy)
     ff = _resolve_ffmpeg()
     if ff and ff != "ffmpeg":
         # yt-dlp merges video+audio with ffmpeg; point it at the resolved
