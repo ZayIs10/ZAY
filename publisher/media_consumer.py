@@ -201,13 +201,13 @@ def _ytdlp_base_opts(dest: Path, section_seconds: float | None = None) -> dict:
     # download through it so the build can run on GitHub's CLOUD runners — whose
     # datacenter IPs YouTube permanently bot-blocks — with the user's PC OFF.
     if proxy:
+        # ONLY yt-dlp gets the proxy (via this opt). Do NOT set http(s)_proxy
+        # in os.environ — that routes EVERY Python HTTPS call through the
+        # residential proxy, including Google Sheets / Drive / Instagram, and
+        # the YouTube-unblocking proxy drops those hosts ("RemoteDisconnected"),
+        # crashing the sheet write at the end of the build. The video+audio
+        # merge is local-file-only (no network), so it never needs the proxy.
         opts["proxy"] = proxy
-        # Backstop for the merge step: if a DASH pair IS used, the ffmpeg merge
-        # only touches LOCAL files (no network), so it can't leak — but export
-        # http(s)_proxy in the environment too so any ffmpeg network op that
-        # ever does happen is covered for HTTPS (which -http_proxy is not).
-        os.environ.setdefault("http_proxy", proxy)
-        os.environ.setdefault("https_proxy", proxy)
     ff = _resolve_ffmpeg()
     if ff and ff != "ffmpeg":
         # yt-dlp merges video+audio with ffmpeg; point it at the resolved
