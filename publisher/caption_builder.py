@@ -85,7 +85,11 @@ def build_reel_caption(topic: str, key_points: str = "",
     spoken = [s for s in _first_sentences(transcript, 6) if len(s) > 25]
     if len(spoken) >= 2:
         for s in spoken[:3]:
-            lines.append(s if len(s) <= 60 else s[:57].rstrip() + "...")
+            if len(s) > 60:
+                # Truncate on a WORD boundary — "your c..." mid-word cuts look
+                # broken on the card.
+                s = s[:57].rsplit(" ", 1)[0].rstrip(" ,;:") + "..."
+            lines.append(s)
     elif key_points:
         # Split the key points into a couple of punchy beats. Break only on
         # STRONG separators (em/en dash, colon, semicolon, period) — never on
