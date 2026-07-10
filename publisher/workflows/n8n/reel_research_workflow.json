@@ -13,10 +13,11 @@
         }
       },
       "id": "node_r1_schedule",
-      "name": "Schedule - Daily 6AM",
+      "name": "Schedule - Daily 6AM (disabled)",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.1,
-      "position": [200, 200]
+      "position": [200, 200],
+      "disabled": true
     },
     {
       "parameters": {},
@@ -172,55 +173,39 @@
     {
       "parameters": {
         "conditions": {
-          "boolean": [
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
             {
-              "value1": "={{ $json.skip === true }}",
-              "value2": false
+              "id": "cond_not_skip",
+              "leftValue": "={{ $json.skip === true }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "notEquals" }
             }
           ]
-        }
+        },
+        "options": {}
       },
       "id": "node_r12_if",
       "name": "IF - Has AI Topics?",
       "type": "n8n-nodes-base.if",
-      "typeVersion": 1,
+      "typeVersion": 2.2,
       "position": [1560, 320]
     },
     {
       "parameters": {
-        "model": "gpt-4o",
-        "messages": {
-          "values": [
-            {
-              "role": "system",
-              "content": "You are a faceless YouTube Shorts scriptwriter and art director for a Gen Z 'AI tools & how-to' channel. You turn a raw topic into a 30-45 second vertical YouTube Short that TEACHES the viewer one concrete, usable thing about AI tools — either how to use a specific tool, or the best tools for a specific task. The viewer must be able to act on it immediately. Style: clear, fast, practical, NO hype, NO emojis, neon-green energy. On-screen text is Anton uppercase, max 6 words per line. The post_caption is rendered AS a static tweet card on top of the reel video (caption never animates) — keep it short, tweet-shaped, scannable in 6 seconds. Output ONLY a valid JSON object, no markdown fences."
-            },
-            {
-              "role": "user",
-              "content": "=Raw candidate topic: {{ $json.title }}\nContext: {{ $json.summary }}\nSource: {{ $json.source }} ({{ $json.url }})\nAI-fit score: {{ $json.reel_fit }}\n\nProduce a JSON object with EXACTLY these keys:\n1. topic: a clean, sharpened how-to / best-tools topic (max 12 words)\n2. key_points: array of 3-5 short concrete takeaway strings the viewer learns\n3. enriched_context: 1-2 sentences of factual context about the tool(s), max 300 chars\n4. headline_line_1: UPPERCASE, max 5 words, white setup line\n5. headline_line_2: UPPERCASE, max 4 words, neon-green KEY tool name or number\n6. headline_line_3: UPPERCASE, max 5 words, white payoff line\n7. subheadline: lowercase, max 12 words, gray\n8. proof_number: the single hero stat, e.g. \"7 TOOLS\", \"IN 2 MIN\", \"10X FASTER\"\n9. proof_label: 2-4 words labelling that stat\n10. reel_script: exactly 5 punchy on-screen lines, newline-separated, max 6 words each, each line teaching a step or naming a tool\n11. template: \"montage_hook\" if the topic lists/showcases multiple tools, otherwise \"five_beat\" for a single how-to walkthrough\n12. voiceover_lines: array of 6 objects {id, start, text}. id is s1..s6. start times MUST be exactly 0.3, 4.3, 10.3, 16.3, 22.3, 27.3. text is one spoken sentence per beat aligned to a 30s timeline that actually teaches the steps; beat 6 is the CTA (subscribe / follow for more AI tips)\n13. post_caption: a SHORT TWEET-SHAPED caption that will be rendered statically as a Twitter-style card pinned on top of the reel video. EXACT FORMAT: 6 to 8 short lines, total under 110 words, plain prose, NO hashtags, NO emojis, no leading hook in caps, no CTA. The FINAL line MUST be exactly: We only post the best AI tools & how-tos\n\nReturn ONLY the JSON object."
-            }
-          ]
-        },
-        "options": {
-          "temperature": 0.8,
-          "response_format": { "type": "json_object" }
-        }
+        "jsCode": "// Build a BARE Reels-tab row per surviving candidate.\n//\n// OpenAI is dead (quota gone), so this workflow does NOT draft the full reel\n// spec here. Instead it writes the MINIMUM the builder needs and lets the\n// builder self-fill everything (script, voiceover, captions, media) for free\n// on its next poll. This mirrors scripts/add_reel_topics_*.py.\n//\n// State: Status='Ready to Run' is Workflow B's trigger word, so each row is\n// claimed automatically. (The daily cap of one reel/day still applies\n// downstream in publish_due_reels.py.)\n\nconst BRAND_TONE = 'Gen Z AI-native energy. Practical, fast, no hype. Teaches young people how to actually use AI tools to work faster and smarter. Bold, direct, neon-green aesthetic, zero fluff. Every video leaves the viewer with something they can use today.';\n\nreturn $input.all().map(item => {\n  const c = item.json;\n  // Turn the raw candidate title into a clean topic string. Keep it short.\n  let topic = (c.title || '').trim().replace(/\\s+/g, ' ');\n  // Strip common clickbait prefixes/emoji-ish noise from source titles.\n  topic = topic.replace(/^[^A-Za-z0-9]+/, '').slice(0, 90).trim();\n\n  const keyPoints = (c.summary || '').toString().slice(0, 200).trim()\n    || 'Teach the viewer one concrete, usable AI trick from this topic.';\n\n  return {\n    json: {\n      'Topic': topic,\n      'Key Points': keyPoints,\n      'Brand Tone': BRAND_TONE,\n      'Enriched Context': `[auto-found] source=${c.source} fit=${c.reel_fit} ${c.url || ''}`.slice(0, 480),\n      'YouTube URL': c.source === 'youtube' ? (c.url || '') : '',\n      'Status': 'Ready to Run',\n      'Post Type': 'reel',\n      'Slide Content': 'reel',\n      'Reel Fit': c.reel_fit != null ? c.reel_fit : ''\n    }\n  };\n});"
       },
-      "id": "node_r13_openai",
-      "name": "OpenAI - Build Short Draft",
-      "type": "@n8n/n8n-nodes-langchain.openAi",
-      "typeVersion": 1.4,
-      "position": [1820, 240]
-    },
-    {
-      "parameters": {
-        "jsCode": "// Parse the OpenAI JSON and map it onto the Reels tab schema.\nlet raw;\ntry {\n  let content = $input.item.json.message?.content || $input.item.json.choices?.[0]?.message?.content || '{}';\n  content = content.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/, '').trim();\n  raw = JSON.parse(content);\n} catch (e) {\n  throw new Error('Failed to parse OpenAI JSON: ' + e.message);\n}\n\nconst src = $('Code - Score AI-Fit & Pick Top').item.json;\nconst vo = Array.isArray(raw.voiceover_lines) ? JSON.stringify(raw.voiceover_lines) : '[]';\n\nreturn {\n  Topic: raw.topic || src.title,\n  'Key Points': Array.isArray(raw.key_points) ? raw.key_points.join(' | ') : (raw.key_points || ''),\n  'Brand Tone': 'Gen Z AI-native energy. Practical, fast, no hype. Teaches young people how to actually use AI tools to work faster.',\n  'Enriched Context': (raw.enriched_context || src.summary || '').slice(0, 500),\n  'YouTube URL': src.source === 'youtube' ? src.url : '',\n  Status: 'Draft',\n  'Post Type': 'reel',\n  'Headline Line 1 (White)': (raw.headline_line_1 || '').toUpperCase(),\n  'Headline Line 2 (Neon Green)': (raw.headline_line_2 || '').toUpperCase(),\n  'Headline Line 3 (White)': (raw.headline_line_3 || '').toUpperCase(),\n  'Subheadline (Gray)': (raw.subheadline || ''),\n  'Key Stat': raw.proof_number || '',\n  'Reel Script': raw.reel_script || '',\n  'Reel Template': raw.template === 'montage_hook' ? 'montage_hook' : 'five_beat',\n  'Voiceover Lines (JSON)': vo,\n  'Post Caption': raw.post_caption || '',\n  'Reel Fit': src.reel_fit != null ? src.reel_fit : ''\n};"
-      },
-      "id": "node_r14_parse",
-      "name": "Code - Parse Short JSON",
+      "id": "node_r13_baserow",
+      "name": "Code - Build Bare Reel Rows",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2080, 240]
+      "position": [1820, 240]
     },
     {
       "parameters": {
@@ -242,14 +227,14 @@
         "options": {}
       },
       "id": "node_r15_append",
-      "name": "Google Sheets - Append Short Draft",
+      "name": "Google Sheets - Append Ready Row",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.4,
       "position": [2340, 240]
     },
     {
       "parameters": {
-        "jsCode": "// Runs once for ALL appended rows -> builds a single summary email.\n// The next step in the lifecycle is the USER: open the Reels tab,\n// review/edit the Post Caption, then flip Status -> Ready. Workflow B\n// (publisher/workflows/n8n/tweet_card_reel_workflow.json) picks it up\n// automatically on the next poll cycle.\nconst rows = $input.all().map(i => i.json).filter(Boolean);\nconst count = rows.length;\nconst sheetUrl = 'https://docs.google.com/spreadsheets/d/13AEU80ULx2Lxnq9SWDeSSFN7unfhr-x_mPyi37oz7O4/edit';\n\nconst list = rows\n  .map((r, i) => `${i + 1}. ${r.Topic || '(untitled)'}  [${r['Reel Template'] || 'five_beat'}]`)\n  .join('\\n');\n\nconst subject = `${count} new AI Short draft${count === 1 ? '' : 's'} ready for review`;\nconst body = `Workflow A just added ${count} draft${count === 1 ? '' : 's'} to the Reels tab.\\n\\n${list}\\n\\nOpen the Sheet, edit the Post Caption if needed, then flip Status -> Ready:\\n${sheetUrl}\\n\\nWorkflow B will pick it up automatically and trigger the GitHub render job. You'll get the finished mp4 in Drive within ~5 minutes.`;\n\nreturn [{ json: { subject, body, count } }];"
+        "jsCode": "// Runs once for ALL appended rows -> builds a single summary email.\n// Because the rows are written 'Ready to Run', Workflow B (the tweet-card reel\n// builder) claims them automatically on its next poll -- no manual step needed.\n// This email is just an FYI of what got queued.\nconst rows = $input.all().map(i => i.json).filter(Boolean);\nconst count = rows.length;\nconst sheetUrl = 'https://docs.google.com/spreadsheets/d/13AEU80ULx2Lxnq9SWDeSSFN7unfhr-x_mPyi37oz7O4/edit';\n\nconst list = rows\n  .map((r, i) => `${i + 1}. ${r.Topic || '(untitled)'}  [fit ${r['Reel Fit'] != null ? r['Reel Fit'] : '?'}]`)\n  .join('\\n');\n\nconst subject = `${count} new AI reel topic${count === 1 ? '' : 's'} queued (Ready to Run)`;\nconst body = `The Topic Finder just added ${count} topic${count === 1 ? '' : 's'} to the Reels tab as 'Ready to Run'.\\n\\n${list}\\n\\nThe reel builder (Workflow B) will pick these up automatically on its next poll and render them (capped to one reel/day downstream). No action needed from you.\\n\\nReels tab:\\n${sheetUrl}`;\n\nreturn [{ json: { subject, body, count } }];"
       },
       "id": "node_r16_summary",
       "name": "Code - Build Email Summary",
@@ -261,21 +246,21 @@
       "parameters": {
         "resource": "message",
         "operation": "send",
-        "sendTo": "88cnl88@gmail.com",
+        "sendTo": "01cnl01@gmail.com",
         "subject": "={{ $json.subject }}",
         "emailType": "text",
         "message": "={{ $json.body }}",
         "options": {}
       },
       "id": "node_r17_gmail",
-      "name": "Gmail - Notify Drafts Ready",
+      "name": "Gmail - Notify Topics Queued",
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
       "position": [2860, 240]
     }
   ],
   "connections": {
-    "Schedule - Daily 6AM": {
+    "Schedule - Daily 6AM (disabled)": {
       "main": [[
         { "node": "HTTP - Reddit AI Posts", "type": "main", "index": 0 },
         { "node": "HTTP - YouTube Best AI Tools", "type": "main", "index": 0 },
@@ -323,21 +308,18 @@
     },
     "IF - Has AI Topics?": {
       "main": [
-        [{ "node": "OpenAI - Build Short Draft", "type": "main", "index": 0 }],
+        [{ "node": "Code - Build Bare Reel Rows", "type": "main", "index": 0 }],
         []
       ]
     },
-    "OpenAI - Build Short Draft": {
-      "main": [[{ "node": "Code - Parse Short JSON", "type": "main", "index": 0 }]]
+    "Code - Build Bare Reel Rows": {
+      "main": [[{ "node": "Google Sheets - Append Ready Row", "type": "main", "index": 0 }]]
     },
-    "Code - Parse Short JSON": {
-      "main": [[{ "node": "Google Sheets - Append Short Draft", "type": "main", "index": 0 }]]
-    },
-    "Google Sheets - Append Short Draft": {
+    "Google Sheets - Append Ready Row": {
       "main": [[{ "node": "Code - Build Email Summary", "type": "main", "index": 0 }]]
     },
     "Code - Build Email Summary": {
-      "main": [[{ "node": "Gmail - Notify Drafts Ready", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Gmail - Notify Topics Queued", "type": "main", "index": 0 }]]
     }
   },
   "settings": {
