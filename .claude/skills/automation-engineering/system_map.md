@@ -76,8 +76,26 @@ Verified 2026-07-04. When an automation changes shape, update THIS file.
 
 ## Research / topic intake
 
-- **Entry:** `scripts/research_topic.py` — topic discovery, smart YouTube
-  transcript pick (free keyword score, no GPT), writes URL + captions to sheet
+- **Topic FINDER (auto-discovery, the "what should we make" step):** n8n
+  workflow "Gen Z AI Tools - Daily YouTube Short Topic Finder"
+  (live id `JHpRFTRB2t7TzqKXweY7b`; source of truth
+  `publisher/workflows/n8n/reel_research_workflow.json`). Free sources
+  (Reddit hot + 2× YouTube search + TechCrunch RSS) → normalize → **AI-fit
+  score** (`Code - Score AI-Fit & Pick Top`: tool +3 / how-to +3 /
+  proof-number +2 / short +1 / off-niche −5, keep top 5, dedupe) → writes
+  **BARE** Reels rows (`Topic + Key Points + Brand Tone + Status='Ready to
+  Run'`) so the builder self-fills the rest for free → emails a summary.
+  The AI-fit scorer IS "the format of how to find a topic." OpenAI draft
+  node was removed (quota dead). **Trigger = Manual only** for now (Schedule
+  node disabled); Sheets+Gmail creds shared from Workflow B
+  (`AKkpUn5IypddfmfE`, `Wx9U0wyKwyNtqtEu`). Run it from the n8n UI's Manual
+  Trigger.
+- **Single-topic research (you already know the topic):**
+  `scripts/research_topic.py` — enriches ONE given topic, smart YouTube
+  transcript pick (free keyword score, no GPT), writes URL + captions to sheet.
+  NOTE its OpenAI draft path is also dead — prefer bare rows.
+- **Manual seed of N topics:** `.tmp/add_reel_topics_*.py` — appends a
+  hand-curated batch as `Ready to Run`; same bare-row pattern.
 - **Classifier:** `publisher/format_classifier.py` auto-tags each topic
   reel vs carousel before drafting
 
