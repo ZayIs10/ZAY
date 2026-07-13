@@ -1,0 +1,11 @@
+Claude just moved into the two apps you already live in: Excel and Word.
+
+Anthropic put Claude directly inside Microsoft's docs and spreadsheets — so instead of copy-pasting between a chatbot and your files, the AI now works in the file with you. Here's what people are actually doing with it.
+
+• Building and fixing spreadsheet formulas by describing them in plain English
+• Turning a messy sheet into a clean summary, chart or pivot in seconds
+• Drafting and rewriting Word docs — reports, emails, contracts — in-line, keeping your formatting
+
+Save this so you can try it, then tell me: which one would you use first? Follow @genzcapital for real AI use cases every week. No fluff. No hype.
+
+#ai #aitools #claude #excel #microsoft365 #productivity #aitips #genzcapital

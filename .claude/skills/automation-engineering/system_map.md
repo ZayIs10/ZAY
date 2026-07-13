@@ -83,8 +83,11 @@ Verified 2026-07-04. When an automation changes shape, update THIS file.
   (Reddit hot + 2× YouTube search + TechCrunch RSS) → normalize → **AI-fit
   score** (`Code - Score AI-Fit & Pick Top`: tool +3 / how-to +3 /
   proof-number +2 / short +1 / off-niche −5, keep top 5, dedupe) → writes
-  **BARE** Reels rows (`Topic + Key Points + Brand Tone + Status='Ready to
-  Run'`) so the builder self-fills the rest for free → emails a summary.
+  **BARE** Reels rows (`Topic + Key Points + Brand Tone + Status='Draft'`)
+  → emails a review summary. **Review gate:** the builder only fires on
+  `Ready to Run`, so nothing builds until the user flips a Draft row by
+  hand — the finder can never trigger an unwanted build, and it does NO
+  media/caption work (disjoint fields from the builder = can't collide).
   The AI-fit scorer IS "the format of how to find a topic." OpenAI draft
   node was removed (quota dead). **Trigger = Manual only** for now (Schedule
   node disabled); Sheets+Gmail creds shared from Workflow B
@@ -138,3 +141,12 @@ that side's run.
   help, a new repo doesn't help; residential proxy or self-hosted runner only
 - **`git push` fails from Bash on this machine** — push via PowerShell
   (Git Credential Manager)
+- **n8n API keys EXPIRE (~30 days)** — when every n8n MCP call returns
+  AUTHENTICATION_ERROR but health_check passes, the JWT in `.claude.json`
+  (`N8N_API_KEY`, two places: global `mcpServers` + the `C:/Users/Marc`
+  project entry) has expired — decode its `exp` to confirm. Fix: user
+  creates a new key in the n8n UI (Settings → n8n API, pick longest/no
+  expiry), then update both `.claude.json` entries and reconnect the MCP.
+  Reconnecting alone never fixes it. Direct REST
+  (`$N8N_API_URL/api/v1/...` with header `X-N8N-API-KEY`) works without
+  an MCP restart.

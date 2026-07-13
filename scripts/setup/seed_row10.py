@@ -8,7 +8,7 @@ load_dotenv()
 
 SHEET_ID = os.environ["GOOGLE_SHEET_ID"]
 SHEET_NAME = os.environ.get("GOOGLE_SHEET_REELS_NAME", "Reels")
-SA_PATH = Path(__file__).resolve().parent.parent / "google_service_account.json"
+SA_PATH = Path(__file__).resolve().parents[2] / "google_service_account.json"
 
 TOPIC = "How to use Claude for coding"
 POST_CAPTION = (
