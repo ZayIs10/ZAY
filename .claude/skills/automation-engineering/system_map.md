@@ -82,12 +82,36 @@ Verified 2026-07-04. When an automation changes shape, update THIS file.
   `publisher/workflows/n8n/reel_research_workflow.json`). Free sources
   (Reddit hot + 2× YouTube search + TechCrunch RSS) → normalize → **AI-fit
   score** (`Code - Score AI-Fit & Pick Top`: tool +3 / how-to +3 /
-  proof-number +2 / short +1 / off-niche −5, keep top 5, dedupe) → writes
-  **BARE** Reels rows (`Topic + Key Points + Brand Tone + Status='Draft'`)
-  → emails a review summary. **Review gate:** the builder only fires on
-  `Ready to Run`, so nothing builds until the user flips a Draft row by
-  hand — the finder can never trigger an unwanted build, and it does NO
-  media/caption work (disjoint fields from the builder = can't collide).
+  the scorer node `Code - Score AI-Fit & Pick Top`) → writes **BARE** Reels
+  rows (`Topic + Key Points + Brand Tone + Status='Draft'`) → emails a
+  review summary. **Review gate:** the builder only fires on `Ready to Run`,
+  so nothing builds until the user flips a Draft row by hand — the finder can
+  never trigger an unwanted build, and it does NO media/caption work
+  (disjoint fields from the builder = can't collide).
+  - **Niche = HARD GATES (not score bonuses):** a topic must pass TOOL
+    (mentions an AI tool) AND ACTION ("here's what you can DO" — how-to,
+    prompt trick, best-tool-for-X, usable feature) AND NOT OFF
+    (finance/crypto, funding/valuation/IPO, lawsuits/regulation, layoffs,
+    make-money/hustle, waitlist/teaser tools, nsfw). Pure announcement
+    headlines with nothing to try are dropped. PROMO signal sinks brand
+    self-promo ads below the gate. Verified 2026-07-13 against live data.
+  - **Freshness:** anything >7 days old is dropped (when the source dates
+    it); ≤2-day items get a bonus and win ties. YouTube `publishedAfter`
+    is also 7 days.
+  - **Cross-run dedupe (fixes repeat-topics):** a `Google Sheets - Read
+    Existing Topics` node reads the Reels tab's Topic column and feeds it
+    to the scorer (Merge input 5) as `{existing_topics:[...]}`; the scorer
+    skips any candidate that exactly- or fuzzy-matches (≥70% token overlap)
+    an existing topic, so re-running surfaces the NEXT-best fresh topics
+    instead of re-appending last run's picks.
+  - **YouTube key gotcha (root cause of the old repeats):** the Hostinger
+    instance blocks `$env` in expressions (`N8N_BLOCK_ENV_ACCESS_IN_NODE`),
+    so `{{ $env.YOUTUBE_API_KEY }}` failed → both YouTube nodes returned 0,
+    Reddit 403s, leaving ONLY TechCrunch RSS (near-static in 47s) → same 5
+    off-niche news picks every run. FIX: the key lives in an n8n
+    **httpQueryAuth credential** `vg0eQOmN5gigPYdB` ("YouTube Data API key
+    (query)"), NOT in the repo JSON and NOT in `$env`. Never hardcode the
+    key into the workflow file — it's committed to a public repo.
   The AI-fit scorer IS "the format of how to find a topic." OpenAI draft
   node was removed (quota dead). **Trigger = Manual only** for now (Schedule
   node disabled); Sheets+Gmail creds shared from Workflow B
