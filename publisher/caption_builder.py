@@ -24,25 +24,31 @@ from __future__ import annotations
 
 import re
 
+# Engagement hook — the FIRST line of every post caption. Drives the "comment
+# a word -> auto-DM" loop (the highest-reach IG growth play). Constant, brand-
+# approved copy (user locked this format 2026-07-04).
+ENGAGEMENT_HOOK = 'Like this post + Comment "Send" and I\'ll DM you the link.'
+
 # Follow CTA — brand rule: name the value, never bare "follow for more".
 FOLLOW_CTA = (
     "Follow @genzcapital, I find the AI tools worth your time so you don't "
     "have to."
 )
 
-# A small, safe hashtag pool. We pick a few that match the topic so IG never
-# sees a spammy >5 block. #AItools + #genz are brand-constant; the rest are
-# added only when the topic mentions them.
-BASE_TAGS = ["#AItools", "#AI"]
+# Hashtag pool. Lowercase (the locked format uses #ai #chatgpt, not #AI). #ai +
+# #aitools + #tech are brand-constant and always present; the rest are added
+# only when the topic mentions them, so IG never sees a spammy >6 block.
+BASE_TAGS = ["#ai", "#aitools"]
+CLOSING_TAG = "#tech"  # always the final tag (matches the locked example)
 TAG_TRIGGERS = [
-    (("chatgpt", "gpt", "openai"), "#ChatGPT"),
-    (("claude", "anthropic"), "#Claude"),
+    (("chatgpt", "gpt", "openai"), "#chatgpt"),
+    (("claude", "anthropic"), "#claude"),
     (("prompt",), "#prompting"),
-    (("browser", "aside", "comet"), "#AIbrowser"),
-    (("agent", "agentic"), "#AIagent"),
+    (("browser", "aside", "comet"), "#aibrowser"),
+    (("agent", "agentic"), "#aiagent"),
     (("automate", "automation", "workflow"), "#automation"),
     (("code", "coding", "developer", "app"), "#coding"),
-    (("productiv", "faster", "hours"), "#productivity"),
+    (("productiv", "faster", "hours", "save"), "#productivity"),
 ]
 
 
@@ -57,14 +63,18 @@ def _first_sentences(text: str, n: int) -> list[str]:
 
 
 def _pick_hashtags(topic: str, key_points: str) -> list[str]:
+    """Return 4-6 lowercase tags: #ai #aitools first, topic-matched middle,
+    #tech last — matching the locked example (#ai #chatgpt #claude ... #tech)."""
     blob = f"{topic} {key_points}".lower()
     tags = list(BASE_TAGS)
     for needles, tag in TAG_TRIGGERS:
         if any(nd in blob for nd in needles) and tag not in tags:
             tags.append(tag)
-        if len(tags) >= 5:
+        if len(tags) >= 5:  # leave room for the constant closing tag
             break
-    return tags[:5]
+    if CLOSING_TAG not in tags:
+        tags.append(CLOSING_TAG)
+    return tags
 
 
 def build_reel_caption(topic: str, key_points: str = "",
@@ -118,35 +128,73 @@ def build_reel_caption(topic: str, key_points: str = "",
 
 def build_post_caption(topic: str, key_points: str = "",
                        transcript: str = "") -> str:
-    """The IG text-box caption: keyword-first, ~80-160 words, follow CTA, ≤5 tags.
+    """The IG text-box caption in the LOCKED format (user set 2026-07-04).
 
-    Brand rules: first sentence carries the core keyword (SEO signal), no emojis,
-    end on a value-named follow CTA, then ≤5 hashtags on the final line.
+    Every caption follows this exact block structure so the whole feed reads
+    consistently and runs the comment->auto-DM growth loop:
+
+        1. Engagement hook  (constant: "Like this post + Comment 'Send'...")
+        2. Keyword opener   (topic-first line, SEO signal)
+        3. Value body       (what it breaks down / why it matters)
+        4. Who it's for     ("Perfect for anyone...")
+        5. Punchy takeaway  (one memorable line)
+        6. Follow CTA       (constant, value-named)
+        7. Hashtags         (lowercase, 4-6, #ai... #tech)
+
+    Blocks are separated by a blank line (IG renders these as paragraph gaps),
+    except the hashtags sit directly under the follow CTA. No emojis. Body is
+    grounded in Key Points + the video transcript when present so it stays
+    specific per post instead of boilerplate.
     """
-    topic = _clean(topic)
+    topic = _clean(topic).rstrip(".")
     key_points = _clean(key_points)
 
-    # Opening sentence MUST contain the topic keyword (search signal).
-    opening = f"{topic} — here's what it means and how to actually use it."
+    # 2. Keyword opener — MUST carry the topic keyword (search + relevance).
+    # If the topic is already a full statement (has a colon or is a long
+    # phrase), let it stand as the opener; otherwise add a hook clause. This
+    # avoids "...Worth Paying For: here's what's actually worth knowing."
+    if ":" in topic or len(topic.split()) >= 7:
+        opener = topic + "."
+    else:
+        opener = f"{topic}: here's what's actually worth knowing."
 
-    body_bits: list[str] = []
-    if key_points:
-        body_bits.append(key_points.rstrip(".") + ".")
-
+    # 3. Value body. Prefer Key Points; enrich with the first real spoken
+    # sentences from the video so the copy describes THIS video, not a template.
     spoken = [s for s in _first_sentences(transcript, 4) if len(s) > 25]
+    body_parts: list[str] = []
+    if key_points:
+        body_parts.append(key_points.rstrip(".") + ".")
     if spoken:
-        body_bits.append(" ".join(spoken[:2]))
-    elif not key_points:
-        body_bits.append(
-            "This is one of those AI shifts worth understanding early, "
-            "because it changes how fast you can get real work done."
+        body_parts.append(" ".join(spoken[:2]))
+    if not body_parts:
+        body_parts.append(
+            "This breaks down exactly how it works and where it actually "
+            "saves you time, without the hype."
         )
+    body = " ".join(body_parts).strip()
+
+    # 4. Who it's for. Anchored to a short subject phrase, not the whole title
+    # jammed in lowercase. Take the part of the topic before a colon (the
+    # subject) and keep it under ~5 words so the line reads naturally.
+    subject = topic.split(":", 1)[0].strip()
+    if len(subject.split()) > 5:
+        subject = ""  # too long to inline cleanly — use a generic close
+    if subject:
+        who = f"Perfect for anyone weighing up {subject.lower()}."
+    else:
+        who = "Perfect for anyone trying to actually get value out of AI, fast."
+
+    # 5. Punchy takeaway — one memorable, opinionated line.
+    takeaway = "Don't adopt AI out of FOMO. Use it where it removes real work."
 
     tags = _pick_hashtags(topic, key_points)
 
     return (
-        f"{opening}\n\n"
-        f"{' '.join(body_bits).strip()}\n\n"
+        f"{ENGAGEMENT_HOOK}\n\n"
+        f"{opener}\n\n"
+        f"{body}\n\n"
+        f"{who}\n\n"
+        f"{takeaway}\n\n"
         f"{FOLLOW_CTA}\n"
         f"{' '.join(tags)}"
     ).strip()
