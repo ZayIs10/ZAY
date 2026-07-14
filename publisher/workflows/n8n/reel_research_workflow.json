@@ -125,43 +125,119 @@
     },
     {
       "parameters": {
-        "jsCode": "// Reddit /hot.json -> normalized candidate list.\n// Tolerates a failed/blocked Reddit call (returns an empty list instead of crashing).\nconst res = ($input.first() && $input.first().json) || {};\nconst children = (res.data && res.data.children) || [];\nconst candidates = children\n  .map(c => c.data)\n  .filter(Boolean)\n  .map(d => ({\n    title: (d.title || '').trim(),\n    summary: (d.selftext || '').slice(0, 300),\n    url: 'https://www.reddit.com' + (d.permalink || ''),\n    source: 'reddit',\n    engagement: (d.ups || 0) + (d.num_comments || 0),\n    published_at: d.created_utc ? d.created_utc * 1000 : null\n  }));\nreturn [{ json: { candidates } }];"
+        "jsCode": "// YouTube search -> keep snippet fields keyed by video id, and emit ONE item\n// carrying the comma-joined id list for the stats call. Tolerates a failed\n// search (returns an empty carrier so the branch degrades to 0, never crashes).\nconst res = ($input.first() && $input.first().json) || {};\nconst items = (res.items || []).filter(it => it && it.id && it.id.videoId);\nconst byId = {};\nfor (const it of items) {\n  byId[it.id.videoId] = {\n    title: (it.snippet.title || '').trim(),\n    summary: (it.snippet.description || '').slice(0, 300),\n    url: 'https://www.youtube.com/watch?v=' + it.id.videoId,\n    source: 'youtube',\n    published_at: it.snippet.publishedAt ? Date.parse(it.snippet.publishedAt) : null\n  };\n}\nconst ids = Object.keys(byId).slice(0, 50); // videos:list caps at 50 ids/call\nreturn [{ json: { ids: ids.join(','), byId } }];"
       },
-      "id": "node_r6_norm_reddit",
-      "name": "Code - Normalize Reddit",
+      "id": "node_r20_ids_tools",
+      "name": "Code - YT Tools IDs",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [760, 60]
+      "position": [720, 200]
     },
     {
       "parameters": {
-        "jsCode": "// YouTube search -> normalized candidate list (used for both YouTube nodes).\nconst res = ($input.first() && $input.first().json) || {};\nconst items = (res.items) || [];\nconst candidates = items\n  .filter(it => it.id && it.id.videoId)\n  .map(it => ({\n    title: (it.snippet.title || '').trim(),\n    summary: (it.snippet.description || '').slice(0, 300),\n    url: 'https://www.youtube.com/watch?v=' + it.id.videoId,\n    source: 'youtube',\n    engagement: 0,\n    published_at: it.snippet.publishedAt ? Date.parse(it.snippet.publishedAt) : null\n  }));\nreturn [{ json: { candidates } }];"
+        "jsCode": "// (same as YT Tools IDs, for the how-to branch)\nconst res = ($input.first() && $input.first().json) || {};\nconst items = (res.items || []).filter(it => it && it.id && it.id.videoId);\nconst byId = {};\nfor (const it of items) {\n  byId[it.id.videoId] = {\n    title: (it.snippet.title || '').trim(),\n    summary: (it.snippet.description || '').slice(0, 300),\n    url: 'https://www.youtube.com/watch?v=' + it.id.videoId,\n    source: 'youtube',\n    published_at: it.snippet.publishedAt ? Date.parse(it.snippet.publishedAt) : null\n  };\n}\nconst ids = Object.keys(byId).slice(0, 50);\nreturn [{ json: { ids: ids.join(','), byId } }];"
+      },
+      "id": "node_r21_ids_howto",
+      "name": "Code - YT How-To IDs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 400]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/youtube/v3/videos",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "part", "value": "statistics" },
+            { "name": "id", "value": "={{ $json.ids }}" }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "options": {}
+      },
+      "id": "node_r22_stats_tools",
+      "name": "HTTP - YT Tools Stats",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [960, 200],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "vg0eQOmN5gigPYdB",
+          "name": "YouTube Data API key (query)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/youtube/v3/videos",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "part", "value": "statistics" },
+            { "name": "id", "value": "={{ $json.ids }}" }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "options": {}
+      },
+      "id": "node_r23_stats_howto",
+      "name": "HTTP - YT How-To Stats",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [960, 400],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "vg0eQOmN5gigPYdB",
+          "name": "YouTube Data API key (query)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge view stats back onto the search snippets (by video id) and emit a\n// normalized candidate list with a real viewCount (engagement = views).\n// $json is the stats response; the snippets are on the IDs node output.\nconst stats = ($input.first() && $input.first().json) || {};\nconst byViews = {};\nfor (const v of (stats.items || [])) {\n  const n = v && v.statistics ? Number(v.statistics.viewCount) : NaN;\n  byViews[v.id] = isFinite(n) ? n : 0;\n}\n// Pull the snippet map from the IDs node (same branch, upstream).\nlet byId = {};\ntry { byId = $('Code - YT Tools IDs').first().json.byId || {}; } catch (e) { byId = {}; }\nconst candidates = Object.keys(byId).map(id => ({\n  ...byId[id],\n  engagement: byViews[id] || 0,   // real YouTube views\n  view_count: byViews[id] || 0\n}));\nreturn [{ json: { candidates } }];"
       },
       "id": "node_r7_norm_yt_tools",
       "name": "Code - Normalize YouTube Tools",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [760, 240]
+      "position": [1200, 200]
     },
     {
       "parameters": {
-        "jsCode": "// YouTube search -> normalized candidate list (used for both YouTube nodes).\nconst res = ($input.first() && $input.first().json) || {};\nconst items = (res.items) || [];\nconst candidates = items\n  .filter(it => it.id && it.id.videoId)\n  .map(it => ({\n    title: (it.snippet.title || '').trim(),\n    summary: (it.snippet.description || '').slice(0, 300),\n    url: 'https://www.youtube.com/watch?v=' + it.id.videoId,\n    source: 'youtube',\n    engagement: 0,\n    published_at: it.snippet.publishedAt ? Date.parse(it.snippet.publishedAt) : null\n  }));\nreturn [{ json: { candidates } }];"
+        "jsCode": "// (same as Normalize YouTube Tools, for the how-to branch)\nconst stats = ($input.first() && $input.first().json) || {};\nconst byViews = {};\nfor (const v of (stats.items || [])) {\n  const n = v && v.statistics ? Number(v.statistics.viewCount) : NaN;\n  byViews[v.id] = isFinite(n) ? n : 0;\n}\nlet byId = {};\ntry { byId = $('Code - YT How-To IDs').first().json.byId || {}; } catch (e) { byId = {}; }\nconst candidates = Object.keys(byId).map(id => ({\n  ...byId[id],\n  engagement: byViews[id] || 0,\n  view_count: byViews[id] || 0\n}));\nreturn [{ json: { candidates } }];"
       },
       "id": "node_r8_norm_yt_howto",
       "name": "Code - Normalize YouTube How-To",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [760, 420]
+      "position": [1200, 400]
     },
     {
       "parameters": {
-        "jsCode": "// RSS feed items -> normalized candidate list\nconst items = $input.all();\nconst candidates = items\n  .map(i => i.json)\n  .filter(Boolean)\n  .map(a => ({\n    title: (a.title || '').trim(),\n    summary: (a.contentSnippet || a.content || '').slice(0, 300),\n    url: a.link || '',\n    source: 'news',\n    engagement: 0,\n    published_at: (a.isoDate || a.pubDate) ? Date.parse(a.isoDate || a.pubDate) : null\n  }));\nreturn [{ json: { candidates } }];"
+        "jsCode": "// Reddit /hot.json -> normalized candidate list.\n// Tolerates a failed/blocked Reddit call (returns an empty list instead of crashing).\nconst res = ($input.first() && $input.first().json) || {};\nconst children = (res.data && res.data.children) || [];\nconst candidates = children\n  .map(c => c.data)\n  .filter(Boolean)\n  .map(d => ({\n    title: (d.title || '').trim(),\n    summary: (d.selftext || '').slice(0, 300),\n    url: 'https://www.reddit.com' + (d.permalink || ''),\n    source: 'reddit',\n    engagement: (d.ups || 0) + (d.num_comments || 0),\n    view_count: null,\n    published_at: d.created_utc ? d.created_utc * 1000 : null\n  }));\nreturn [{ json: { candidates } }];"
+      },
+      "id": "node_r6_norm_reddit",
+      "name": "Code - Normalize Reddit",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 60]
+    },
+    {
+      "parameters": {
+        "jsCode": "// RSS feed items -> normalized candidate list\nconst items = $input.all();\nconst candidates = items\n  .map(i => i.json)\n  .filter(Boolean)\n  .map(a => ({\n    title: (a.title || '').trim(),\n    summary: (a.contentSnippet || a.content || '').slice(0, 300),\n    url: a.link || '',\n    source: 'news',\n    engagement: 0,\n    view_count: null,\n    published_at: (a.isoDate || a.pubDate) ? Date.parse(a.isoDate || a.pubDate) : null\n  }));\nreturn [{ json: { candidates } }];"
       },
       "id": "node_r9_norm_rss",
       "name": "Code - Normalize RSS",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [760, 600]
+      "position": [1200, 600]
     },
     {
       "parameters": {
@@ -181,7 +257,7 @@
       "name": "Google Sheets - Read Existing Topics",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.4,
-      "position": [480, 780],
+      "position": [960, 780],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
       "credentials": {
@@ -199,7 +275,7 @@
       "name": "Code - Normalize Existing Topics",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [760, 780]
+      "position": [1200, 780]
     },
     {
       "parameters": {
@@ -210,17 +286,17 @@
       "name": "Merge - All Candidates",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3,
-      "position": [1040, 320]
+      "position": [1480, 380]
     },
     {
       "parameters": {
-        "jsCode": "// AI-how-to-fit scoring + freshness + cross-run dedupe.\n//\n// THE NICHE -- enforced as HARD GATES, not score bonuses:\n//   Every topic must teach ONE concrete, usable thing about an AI tool:\n//   how to use it, a prompt trick, or which AI tool is best for a task.\n//   - TOOL gate:   must mention an AI tool / product\n//   - ACTION gate: must have a \"here's what you can DO\" angle -- pure\n//     announcement headlines with nothing to try are dropped\n//   - OFF gate:    finance/crypto, politics/legal, layoffs, motivation,\n//     nsfw, and tools nobody can access yet (waitlist/teaser) -> hard drop\n//\n// FRESHNESS: anything older than MAX_AGE_DAYS is dropped (when the source\n// gives a date); newer topics get a score bonus and win ties.\n//\n// CROSS-RUN DEDUPE: topics already on the Reels tab (any Status) are\n// skipped BEFORE the top-N cut, so re-running the finder surfaces the\n// NEXT-best fresh topics instead of re-appending last run's picks.\n// The sheet list arrives via Merge input 5 as { existing_topics: [...] }.\n\nconst TOP_N = 5;\nconst MAX_AGE_DAYS = 7;\nconst MIN_SCORE = 7;\n\n// ---- split the sheet's existing topics from the source candidates ----\nconst all = [];\nlet existing = [];\nfor (const item of $input.all()) {\n  const j = item.json || {};\n  if (Array.isArray(j.existing_topics)) { existing = existing.concat(j.existing_topics); continue; }\n  for (const c of (j.candidates || [])) all.push(c);\n}\n\n// ---- niche gates ----\nconst TOOL = /(\\bai\\b|chatgpt|\\bgpt\\b|claude|gemini|grok|midjourney|sora|perplexity|notion ?ai|zapier|n8n|copilot|\\bllm\\b|ai agent|prompt|automation|deepseek|runway|elevenlabs|heygen|cursor|windsurf|lovable|bolt\\.new|\\bveo\\b|nano ?banana|comfyui|stable diffusion|\\bflux\\b|suno|kling|luma|pika)/i;\nconst ACTION = /(how to|how i\\b|tutorial|guide|step[- ]by[- ]step|\\bus(e|es|ed|ing)\\b|set ?up|build|built|create|automate|workflow|hack|trick|\\btips?\\b|prompt|best |top \\d|\\bvs\\.?\\b|versus|compar(e|ison|ed)|you can now|now you can|lets you|in \\d+ ?(minutes?|mins?|seconds?|secs?)|without cod(e|ing)|for free\\b)/i;\nconst NUM = /(\\d+\\s?(ai\\s?)?tools?|\\d+\\s?%|in\\s?\\d+\\s?(min|minute|sec|second|hour|day)|\\btop\\s?\\d+\\b|\\d+x\\b)/i;\nconst OFF = /(stock(s| market)?|crypto|bitcoin|ethereum|\\bnft\\b|invest|trading|trader|\\bipo\\b|raise[sd] \\$|funding|valuation|acqui(res?|sition)|merger|lawsuit|sues?\\b|court|antitrust|regulat|senate|congress|election|politic|tariff|layoffs?|motivat|mindset|hustle|get rich|millionaire|passive income|make (money|\\$)|making money|\\$\\d+\\s?(k|per|\\/|a )|\\d+\\s?(k|dollars?)\\s?(\\/|per|a )\\s?(mo|month|day|week)|side hustle|earn \\$|nsfw|onlyfans|ai (girlfriend|boyfriend)|waifu|waitlist|coming soon|invite[- ]only|sneak peek|teaser)/i;\n\nfunction blobOf(c) { return ((c.title || '') + ' ' + (c.summary || '')).toLowerCase(); }\nfunction passesNiche(c) {\n  const blob = blobOf(c);\n  return TOOL.test(blob) && ACTION.test(blob) && !OFF.test(blob);\n}\n\n// ---- freshness ----\nfunction ageDays(c) {\n  if (!c.published_at || !isFinite(c.published_at)) return null; // unknown date -> can't judge\n  return (Date.now() - c.published_at) / 86400000;\n}\nfunction ageLabel(c) {\n  const a = ageDays(c);\n  if (a === null) return '?';\n  return a < 1 ? Math.max(1, Math.round(a * 24)) + 'h' : Math.round(a) + 'd';\n}\n\n// ---- scoring (ranking only -- the gates above decide in/out) ----\n// Brand self-promo / advertisement videos (\\\"See what X can do for you\\\",\n// official product channels) look like best-AI-tool content but are ads.\n// order=viewCount surfaces them a lot. Downrank, don't hard-drop.\nconst PROMO = /(see what .* can do for you|introducing |official (trailer|video|launch)|sponsored|get started (free|today) with)/i;\n\nfunction score(c) {\n  const t = (c.title || '').trim();\n  const blob = blobOf(c);\n  const words = t.split(/\\s+/).filter(Boolean).length;\n  let s = 6; // TOOL + ACTION gates passed (same weight as the old +3+3 so MIN_SCORE reads the same)\n  if (words >= 3 && words <= 16) s += 2;   // collapses into a hook line\n  if (NUM.test(blob)) s += 2;              // has a concrete proof number\n  if (words <= 12) s += 1;                 // short enough for on-screen text\n  if (c.engagement > 1000) s += 1;         // already proven to travel\n  const a = ageDays(c);\n  if (a !== null && a <= 2) s += 2;        // brand new -> beats older ties\n  else if (a !== null && a <= 4) s += 1;\n  if (PROMO.test(blob)) s -= 4;            // looks like an ad -> sink below the gate\n  return s;\n}\n\n// ---- dedupe: exact normalized key + word-overlap fuzzy match ----\nconst STOP = new Set(['the','a','an','to','for','of','in','on','with','and','or','is','are','your','you','this','that','it','its','my','how','what','why','from','into']);\nfunction norm(s) { return (s || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\\s+/g, ' ').trim(); }\nfunction tokens(s) { return new Set(norm(s).split(' ').filter(w => w.length > 2 && !STOP.has(w))); }\nfunction overlaps(aTok, bTok) {\n  if (!aTok.size || !bTok.size) return false;\n  let inter = 0;\n  for (const w of aTok) if (bTok.has(w)) inter++;\n  return inter / Math.min(aTok.size, bTok.size) >= 0.7; // \"mostly the same words\" -> same topic\n}\nconst existingKeys = new Set(existing.map(norm));\nconst existingToks = existing.map(tokens);\nconst seenKeys = new Set();\nconst seenToks = [];\nfunction isDup(title) {\n  const k = norm(title);\n  if (seenKeys.has(k) || existingKeys.has(k)) return true;\n  const tk = tokens(title);\n  for (const et of existingToks) if (overlaps(tk, et)) return true;\n  for (const st of seenToks) if (overlaps(tk, st)) return true;\n  seenKeys.add(k);\n  seenToks.push(tk);\n  return false;\n}\n\n// ---- pipeline: fresh -> on-niche -> scored -> best-first -> deduped top N ----\nconst scored = all\n  .filter(c => c && c.title && c.title.length > 12)\n  .filter(c => { const a = ageDays(c); return a === null || a <= MAX_AGE_DAYS; })\n  .filter(passesNiche)\n  .map(c => ({ ...c, reel_fit: score(c), age_label: ageLabel(c) }))\n  .filter(c => c.reel_fit >= MIN_SCORE)\n  .sort((x, y) => y.reel_fit - x.reel_fit || (y.published_at || 0) - (x.published_at || 0));\n\nconst picked = [];\nfor (const c of scored) {\n  if (picked.length >= TOP_N) break;\n  if (!isDup(c.title)) picked.push(c);\n}\n\nif (picked.length === 0) {\n  return [{ json: { skip: true, title: 'NO_AI_TOPICS' } }];\n}\nreturn picked.map(c => ({ json: c }));"
+        "jsCode": "// AI-how-to-fit scoring + freshness + VIEW-COUNT gate + cross-run dedupe.\n//\n// THE NICHE -- enforced as HARD GATES, not score bonuses:\n//   Every topic must teach ONE concrete, usable thing about an AI tool:\n//   how to use it, a prompt trick, or which AI tool is best for a task.\n//   - TOOL gate:   must mention an AI tool / product\n//   - ACTION gate: must have a \"here's what you can DO\" angle -- pure\n//     announcement headlines with nothing to try are dropped\n//   - OFF gate:    finance/crypto, politics/legal, layoffs, motivation,\n//     make-money/hustle, nsfw, tools nobody can access yet -> hard drop\n//\n// VIEW-COUNT gate (YouTube only): a YouTube candidate must have >= MIN_VIEWS\n// real views to qualify -- proves the video actually converts. Non-YouTube\n// sources (news/reddit) have no view metric and are exempt from this gate.\n//\n// FRESHNESS: anything older than MAX_AGE_DAYS is dropped (when dated); newer\n// topics get a score bonus and win ties.\n//\n// CROSS-RUN DEDUPE: topics already on the Reels tab (any Status) are skipped\n// BEFORE the top-N cut, so re-running finds NEXT-best fresh topics instead of\n// re-appending. Same topic = exact/reorder match, OR high token overlap where\n// the only differing words are generic filler (reword/year-swap). A differing\n// CONTENT word ('emails' vs 'reports') keeps them distinct -- so real new\n// topics are never wrongly dropped. The hard \"never the same topic twice\" rule.\n//   The sheet list arrives via Merge input 5 as { existing_topics: [...] }.\n\nconst TOP_N = 5;\nconst MAX_AGE_DAYS = 7;\nconst MIN_SCORE = 7;\nconst MIN_VIEWS = 5000;        // YouTube view floor -- proven-traction bar\nconst DEDUPE_OVERLAP = 0.72;   // high-overlap TRIGGER; a fuzzy match ALSO\n// requires every differing word to be generic filler (see overlaps). So two\n// titles that differ by a real content word ('emails' vs 'reports', 'video'\n// vs 'photo') stay DISTINCT even at high overlap, while pure rewords /\n// reorders / year-swaps ('best...2026...today' vs 'best...2026') dedupe.\n\n// ---- split the sheet's existing topics from the source candidates ----\nconst all = [];\nlet existing = [];\nfor (const item of $input.all()) {\n  const j = item.json || {};\n  if (Array.isArray(j.existing_topics)) { existing = existing.concat(j.existing_topics); continue; }\n  for (const c of (j.candidates || [])) all.push(c);\n}\n\n// ---- niche gates ----\nconst TOOL = /(\\bai\\b|chatgpt|\\bgpt\\b|claude|gemini|grok|midjourney|sora|perplexity|notion ?ai|zapier|n8n|copilot|\\bllm\\b|ai agent|prompt|automation|deepseek|runway|elevenlabs|heygen|cursor|windsurf|lovable|bolt\\.new|\\bveo\\b|nano ?banana|comfyui|stable diffusion|\\bflux\\b|suno|kling|luma|pika)/i;\nconst ACTION = /(how to|how i\\b|tutorial|guide|step[- ]by[- ]step|\\bus(e|es|ed|ing)\\b|set ?up|build|built|create|automate|workflow|hack|trick|\\btips?\\b|prompt|best |top \\d|\\bvs\\.?\\b|versus|compar(e|ison|ed)|you can now|now you can|lets you|in \\d+ ?(minutes?|mins?|seconds?|secs?)|without cod(e|ing)|for free\\b)/i;\nconst NUM = /(\\d+\\s?(ai\\s?)?tools?|\\d+\\s?%|in\\s?\\d+\\s?(min|minute|sec|second|hour|day)|\\btop\\s?\\d+\\b|\\d+x\\b)/i;\nconst OFF = /(stock(s| market)?|crypto|bitcoin|ethereum|\\bnft\\b|invest|trading|trader|\\bipo\\b|raise[sd] \\$|funding|valuation|acqui(res?|sition)|merger|lawsuit|sues?\\b|court|antitrust|regulat|senate|congress|election|politic|tariff|layoffs?|motivat|mindset|hustle|get rich|millionaire|passive income|make (money|\\$)|making money|\\$\\d+\\s?(k|per|\\/|a )|\\d+\\s?(k|dollars?)\\s?(\\/|per|a )\\s?(mo|month|day|week)|side hustle|earn \\$|nsfw|onlyfans|ai (girlfriend|boyfriend)|waifu|waitlist|coming soon|invite[- ]only|sneak peek|teaser)/i;\n// JUNK gate: high-view but low-quality YouTube noise -- hashtag spam,\n// non-English tutorials, cartoon/meme edits, engagement-bait titles. These\n// pass niche+views but are NOT clean AI-skill content for our audience.\nconst JUNK = /(#\\w|kaise banaye|kaise kare|banaye|dekho|\\bviral\\b|#shorts|shortsfeed|foryou|subscriber|1million|motu patlu|cartoon|meme|vlog|status video|\\bwhatsapp\\b|\\bhindi\\b|\\burdu\\b|\\bbangla\\b|prank|\\blive test\\b|gone wrong|you won'?t believe|shocking|\\bomg\\b)/i;\n// A pile of hashtags (>=2) is a spam signal on its own.\nfunction hashtagSpam(t) { return ((t || '').match(/#/g) || []).length >= 2; }\n\nfunction blobOf(c) { return ((c.title || '') + ' ' + (c.summary || '')).toLowerCase(); }\nfunction passesNiche(c) {\n  const blob = blobOf(c);\n  if (!TOOL.test(blob) || !ACTION.test(blob) || OFF.test(blob)) return false;\n  // JUNK/hashtag-spam only applies to YouTube (news/reddit titles are clean).\n  if (c.source === 'youtube' && (JUNK.test(blob) || hashtagSpam(c.title))) return false;\n  return true;\n}\nfunction passesViews(c) {\n  // Only YouTube carries a view metric; other sources are exempt.\n  if (c.source !== 'youtube') return true;\n  return Number(c.view_count || 0) >= MIN_VIEWS;\n}\n\n// ---- freshness ----\nfunction ageDays(c) {\n  if (!c.published_at || !isFinite(c.published_at)) return null;\n  return (Date.now() - c.published_at) / 86400000;\n}\nfunction ageLabel(c) {\n  const a = ageDays(c);\n  if (a === null) return '?';\n  return a < 1 ? Math.max(1, Math.round(a * 24)) + 'h' : Math.round(a) + 'd';\n}\nfunction viewsLabel(n) {\n  if (!n) return '';\n  if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\\.0$/, '') + 'M';\n  if (n >= 1000) return Math.round(n / 1000) + 'K';\n  return String(n);\n}\n\n// ---- self-promo signal (ads that look like best-tool content) ----\nconst PROMO = /(see what .* can do for you|introducing |official (trailer|video|launch)|sponsored|get started (free|today) with)/i;\n\n// ---- scoring (ranking only -- the gates above decide in/out) ----\nfunction score(c) {\n  const t = (c.title || '').trim();\n  const blob = blobOf(c);\n  const words = t.split(/\\s+/).filter(Boolean).length;\n  let s = 6; // TOOL + ACTION gates passed\n  if (words >= 3 && words <= 16) s += 2;\n  if (NUM.test(blob)) s += 2;\n  if (words <= 12) s += 1;\n  // View-count ranking: more real views -> higher (YouTube only).\n  const v = Number(c.view_count || 0);\n  if (v >= 500000) s += 3;\n  else if (v >= 100000) s += 2;\n  else if (v >= 20000) s += 1;\n  const a = ageDays(c);\n  if (a !== null && a <= 2) s += 2;\n  else if (a !== null && a <= 4) s += 1;\n  if (PROMO.test(blob)) s -= 4;\n  return s;\n}\n\n// ---- dedupe: exact normalized key + word-overlap fuzzy match ----\nconst STOP = new Set(['the','a','an','to','for','of','in','on','with','and','or','is','are','your','you','this','that','it','its','my','how','what','why','from','into','2025','2026','new','best','top']);\nfunction norm(s) { return (s || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\\s+/g, ' ').trim(); }\nfunction tokens(s) { return new Set(norm(s).split(' ').filter(w => w.length > 2 && !STOP.has(w))); }\n// Generic filler: words that reword a title without changing its TOPIC. If two\n// high-overlap titles differ ONLY by these, they are the same topic reworded.\n// Any OTHER differing word is a real content noun -> distinct topic, keep both.\nconst FILLER = new Set(['use','uses','used','using','guide','tutorial','complete','full','easy','quick','fast','simple','way','ways','today','now','week','method','tip','tips','trick','tricks','hack','hacks','should','try','tried','them','all','free','course','beginner','beginners','ultimate','make','making','create','creating','build','building','learn','learning','step','steps','crash','2024','using']);\nfunction overlaps(aTok, bTok) {\n  if (!aTok.size || !bTok.size) return false;\n  let inter = 0;\n  for (const w of aTok) if (bTok.has(w)) inter++;\n  const ratio = inter / Math.min(aTok.size, bTok.size);\n  if (ratio < DEDUPE_OVERLAP) return false;\n  // High overlap -> a dup ONLY if every differing word is generic filler.\n  for (const w of aTok) if (!bTok.has(w) && !FILLER.has(w)) return false;\n  for (const w of bTok) if (!aTok.has(w) && !FILLER.has(w)) return false;\n  return true;\n}\nconst existingKeys = new Set(existing.map(norm));\nconst existingToks = existing.map(tokens);\nconst seenKeys = new Set();\nconst seenToks = [];\nfunction isDup(title) {\n  const k = norm(title);\n  if (!k) return true; // empty title -> treat as dup (drop)\n  if (seenKeys.has(k) || existingKeys.has(k)) return true;\n  const tk = tokens(title);\n  for (const et of existingToks) if (overlaps(tk, et)) return true;\n  for (const st of seenToks) if (overlaps(tk, st)) return true;\n  seenKeys.add(k);\n  seenToks.push(tk);\n  return false;\n}\n\n// ---- pipeline: fresh -> views -> on-niche -> scored -> best-first -> deduped top N ----\nconst scored = all\n  .filter(c => c && c.title && c.title.length > 12)\n  .filter(c => { const a = ageDays(c); return a === null || a <= MAX_AGE_DAYS; })\n  .filter(passesViews)\n  .filter(passesNiche)\n  .map(c => ({ ...c, reel_fit: score(c), age_label: ageLabel(c), views_label: viewsLabel(Number(c.view_count || 0)) }))\n  .filter(c => c.reel_fit >= MIN_SCORE)\n  .sort((x, y) => y.reel_fit - x.reel_fit || Number(y.view_count || 0) - Number(x.view_count || 0) || (y.published_at || 0) - (x.published_at || 0));\n\nconst picked = [];\nfor (const c of scored) {\n  if (picked.length >= TOP_N) break;\n  if (!isDup(c.title)) picked.push(c);\n}\n\nif (picked.length === 0) {\n  return [{ json: { skip: true, title: 'NO_AI_TOPICS' } }];\n}\nreturn picked.map(c => ({ json: c }));"
       },
       "id": "node_r11_score",
       "name": "Code - Score AI-Fit & Pick Top",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1300, 320]
+      "position": [1740, 380]
     },
     {
       "parameters": {
@@ -247,17 +323,17 @@
       "name": "IF - Has AI Topics?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [1560, 320]
+      "position": [2000, 380]
     },
     {
       "parameters": {
-        "jsCode": "// Build a BARE Reels-tab row per surviving candidate.\n//\n// This finder ONLY finds topics. It writes the MINIMUM (Topic + Key Points +\n// Brand Tone) and does NO media-finding, NO YouTube-replacement, NO caption\n// writing -- all of that is the builder's (Workflow B) job, done later on its\n// own copy of the row. So the two automations never touch the same fields and\n// can't crash each other.\n//\n// State: Status='Draft'. The builder ONLY fires on 'Ready to Run', so a Draft\n// is ignored until the user reviews the 5 topics and flips the good ones to\n// 'Ready to Run' by hand. This is the review gate -- the finder can never\n// trigger an unwanted build.\n\nconst BRAND_TONE = 'Gen Z AI-native energy. Practical, fast, no hype. Teaches young people how to actually use AI tools to work faster and smarter. Bold, direct, neon-green aesthetic, zero fluff. Every video leaves the viewer with something they can use today.';\n\nreturn $input.all().map(item => {\n  const c = item.json;\n  // Turn the raw candidate title into a clean topic string. Keep it short.\n  let topic = (c.title || '').trim().replace(/\\s+/g, ' ');\n  // Strip common clickbait prefixes/emoji-ish noise from source titles.\n  topic = topic.replace(/^[^A-Za-z0-9]+/, '').slice(0, 90).trim();\n\n  const keyPoints = (c.summary || '').toString().slice(0, 200).trim()\n    || 'Teach the viewer one concrete, usable AI trick from this topic.';\n\n  return {\n    json: {\n      'Topic': topic,\n      'Key Points': keyPoints,\n      'Brand Tone': BRAND_TONE,\n      'Enriched Context': `[auto-found] source=${c.source} fit=${c.reel_fit} age=${c.age_label || '?'} ${c.url || ''}`.slice(0, 480),\n      'YouTube URL': c.source === 'youtube' ? (c.url || '') : '',\n      'Status': 'Draft',\n      'Post Type': 'reel',\n      'Slide Content': 'reel',\n      'Reel Fit': c.reel_fit != null ? c.reel_fit : ''\n    }\n  };\n});"
+        "jsCode": "// Build a BARE Reels-tab row per surviving candidate.\n//\n// This finder ONLY finds topics. It writes the MINIMUM (Topic + Key Points +\n// Brand Tone) and does NO media-finding, NO YouTube-replacement, NO caption\n// writing -- all of that is the builder's (Workflow B) job, done later on its\n// own copy of the row. So the two automations never touch the same fields and\n// can't crash each other.\n//\n// State: Status='Draft'. The builder ONLY fires on 'Ready to Run', so a Draft\n// is ignored until the user reviews the 5 topics and flips the good ones to\n// 'Ready to Run' by hand. This is the review gate -- the finder can never\n// trigger an unwanted build.\n\nconst BRAND_TONE = 'Gen Z AI-native energy. Practical, fast, no hype. Teaches young people how to actually use AI tools to work faster and smarter. Bold, direct, neon-green aesthetic, zero fluff. Every video leaves the viewer with something they can use today.';\n\nreturn $input.all().map(item => {\n  const c = item.json;\n  // Turn the raw candidate title into a clean topic string. Keep it short.\n  let topic = (c.title || '').trim().replace(/\\s+/g, ' ');\n  // Strip common clickbait prefixes/emoji-ish noise from source titles.\n  topic = topic.replace(/^[^A-Za-z0-9]+/, '').slice(0, 90).trim();\n\n  const keyPoints = (c.summary || '').toString().slice(0, 200).trim()\n    || 'Teach the viewer one concrete, usable AI trick from this topic.';\n\n  const views = c.views_label ? ` views=${c.views_label}` : '';\n  return {\n    json: {\n      'Topic': topic,\n      'Key Points': keyPoints,\n      'Brand Tone': BRAND_TONE,\n      'Enriched Context': `[auto-found] source=${c.source} fit=${c.reel_fit} age=${c.age_label || '?'}${views} ${c.url || ''}`.slice(0, 480),\n      'YouTube URL': c.source === 'youtube' ? (c.url || '') : '',\n      'Status': 'Draft',\n      'Post Type': 'reel',\n      'Slide Content': 'reel',\n      'Reel Fit': c.reel_fit != null ? c.reel_fit : ''\n    }\n  };\n});"
       },
       "id": "node_r13_baserow",
       "name": "Code - Build Bare Reel Rows",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1820, 240]
+      "position": [2260, 300]
     },
     {
       "parameters": {
@@ -282,7 +358,7 @@
       "name": "Google Sheets - Append Ready Row",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.4,
-      "position": [2340, 240],
+      "position": [2520, 300],
       "credentials": {
         "googleSheetsOAuth2Api": {
           "id": "AKkpUn5IypddfmfE",
@@ -292,13 +368,13 @@
     },
     {
       "parameters": {
-        "jsCode": "// Runs once for ALL appended rows -> builds a single summary email.\n// Rows are written 'Draft' (the review gate) -- the builder ignores Drafts, so\n// nothing builds until the user flips the good ones to 'Ready to Run'.\nconst rows = $input.all().map(i => i.json).filter(Boolean);\nconst count = rows.length;\nconst sheetUrl = 'https://docs.google.com/spreadsheets/d/13AEU80ULx2Lxnq9SWDeSSFN7unfhr-x_mPyi37oz7O4/edit';\n\nconst list = rows\n  .map((r, i) => {\n    const m = /age=(\\S+)/.exec(r['Enriched Context'] || '');\n    const age = m && m[1] !== '?' ? `, ${m[1]} old` : '';\n    return `${i + 1}. ${r.Topic || '(untitled)'}  [fit ${r['Reel Fit'] != null ? r['Reel Fit'] : '?'}${age}]`;\n  })\n  .join('\\n');\n\nconst subject = `${count} new AI reel topic${count === 1 ? '' : 's'} found - review to build`;\nconst body = `The Topic Finder added ${count} topic${count === 1 ? '' : 's'} to the Reels tab as 'Draft'.\\n\\n${list}\\n\\nEvery topic is on-niche (an AI tool + something you can DO with it), at most 7 days old, and deduped against everything already on the sheet -- re-running the finder finds NEW topics, not last time's.\\n\\nNothing builds yet. Open the Reels tab, look these over, and change Status from 'Draft' to 'Ready to Run' on the ones you want made. The reel builder (Workflow B) then picks up ONLY those and renders them (capped to one reel/day). Leave a row on 'Draft' to skip it.\\n\\nReels tab:\\n${sheetUrl}`;\n\nreturn [{ json: { subject, body, count } }];"
+        "jsCode": "// Runs once for ALL appended rows -> builds a single summary email.\n// Rows are written 'Draft' (the review gate) -- the builder ignores Drafts, so\n// nothing builds until the user flips the good ones to 'Ready to Run'.\nconst rows = $input.all().map(i => i.json).filter(Boolean);\nconst count = rows.length;\nconst sheetUrl = 'https://docs.google.com/spreadsheets/d/13AEU80ULx2Lxnq9SWDeSSFN7unfhr-x_mPyi37oz7O4/edit';\n\nconst list = rows\n  .map((r, i) => {\n    const ctx = r['Enriched Context'] || '';\n    const am = /age=(\\S+)/.exec(ctx);\n    const vm = /views=(\\S+)/.exec(ctx);\n    const age = am && am[1] !== '?' ? `, ${am[1]} old` : '';\n    const views = vm ? `, ${vm[1]} views` : '';\n    return `${i + 1}. ${r.Topic || '(untitled)'}  [fit ${r['Reel Fit'] != null ? r['Reel Fit'] : '?'}${age}${views}]`;\n  })\n  .join('\\n');\n\nconst subject = `${count} new AI reel topic${count === 1 ? '' : 's'} found - review to build`;\nconst body = `The Topic Finder added ${count} topic${count === 1 ? '' : 's'} to the Reels tab as 'Draft'.\\n\\n${list}\\n\\nEvery topic is on-niche (an AI tool + something you can DO with it), at most 7 days old, deduped against everything already on the sheet, and (for YouTube) backed by a video with 5,000+ views -- so re-running finds NEW, proven topics, not last time's.\\n\\nNothing builds yet. Open the Reels tab, look these over, and change Status from 'Draft' to 'Ready to Run' on the ones you want made. The reel builder (Workflow B) then picks up ONLY those and renders them (capped to one reel/day). Leave a row on 'Draft' to skip it.\\n\\nReels tab:\\n${sheetUrl}`;\n\nreturn [{ json: { subject, body, count } }];"
       },
       "id": "node_r16_summary",
       "name": "Code - Build Email Summary",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2600, 240]
+      "position": [2780, 300]
     },
     {
       "parameters": {
@@ -314,7 +390,7 @@
       "name": "Gmail - Notify Topics Queued",
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
-      "position": [2860, 240],
+      "position": [3040, 300],
       "credentials": {
         "gmailOAuth2": {
           "id": "Wx9U0wyKwyNtqtEu",
@@ -346,9 +422,21 @@
       "main": [[{ "node": "Code - Normalize Reddit", "type": "main", "index": 0 }]]
     },
     "HTTP - YouTube Best AI Tools": {
+      "main": [[{ "node": "Code - YT Tools IDs", "type": "main", "index": 0 }]]
+    },
+    "Code - YT Tools IDs": {
+      "main": [[{ "node": "HTTP - YT Tools Stats", "type": "main", "index": 0 }]]
+    },
+    "HTTP - YT Tools Stats": {
       "main": [[{ "node": "Code - Normalize YouTube Tools", "type": "main", "index": 0 }]]
     },
     "HTTP - YouTube AI How-To": {
+      "main": [[{ "node": "Code - YT How-To IDs", "type": "main", "index": 0 }]]
+    },
+    "Code - YT How-To IDs": {
+      "main": [[{ "node": "HTTP - YT How-To Stats", "type": "main", "index": 0 }]]
+    },
+    "HTTP - YT How-To Stats": {
       "main": [[{ "node": "Code - Normalize YouTube How-To", "type": "main", "index": 0 }]]
     },
     "RSS - TechCrunch AI": {
