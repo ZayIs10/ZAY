@@ -162,6 +162,9 @@ that side's run.
 - Sheet ID `13AEU80ULx2Lxnq9SWDeSSFN7unfhr-x_mPyi37oz7O4`; tabs: `reels`
   and `carousels` (split 2026-06-28)
 - Caption columns: Reel Caption = col 29, Post Caption = col 30
+- `Created Date` (Reels col 42, added 2026-07-19): render-finish stamp in
+  SGT ("YYYY-MM-DD HH:MM:SS"), written by the build on success;
+  `Media Found At` stays UTC for machine use
 - Status words are the state machine — a distinct trigger word
   (`Ready to Run`) vs done word (`Ready to Post`) prevents duplicate renders
 

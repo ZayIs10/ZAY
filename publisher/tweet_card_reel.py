@@ -31,7 +31,7 @@ import os
 import re
 import sys
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -635,6 +635,14 @@ def run(row_index: int | None, *, topic: str | None = None, dry_run: bool) -> in
     _try_update(
         reader, row_index, "Media Found At",
         datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    )
+    # Stamp WHEN this reel was rendered, in the user's own clock (SGT,
+    # UTC+8, no DST) so the sheet reads naturally — unlike Media Found At,
+    # which stays UTC for machine use. Column: "Created Date".
+    _try_update(
+        reader, row_index, "Created Date",
+        datetime.now(timezone(timedelta(hours=8))).strftime(
+            "%Y-%m-%d %H:%M:%S"),
     )
     _try_update(reader, row_index, "Status", DONE_STATUS)
 

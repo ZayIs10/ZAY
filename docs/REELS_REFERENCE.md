@@ -202,7 +202,8 @@ word (`Ready to Post`) so a re-poll never re-triggers a finished row.
 - **Reads:** `Topic`, `Post Caption`, `Media Video URL`, `Media Image URL`,
   `Key Points`.
 - **Writes:** `Status`, `Reel MP4 URL`, `Media Status` (errors),
-  `Media Found At`.
+  `Media Found At` (UTC, machine use), `Created Date` (render finish
+  date+time in SGT, human-readable — added 2026-07-19).
 
 ---
 
