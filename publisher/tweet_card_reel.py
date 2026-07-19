@@ -13,7 +13,8 @@ Pipeline:
   6. Fetch a viral hook opener clip (publisher/hook_opener.py,
      viralhooks.org — best-effort, reel builds without it on failure).
   7. Composite the final mp4 (publisher/compositor.py): whole hook
-     full-screen first, then poster intro + clip, card overlaid on all.
+     full-screen first (clean, no card), then poster intro + clip with
+     the tweet card overlaid.
   8. Upload to Drive (reuse publisher/publish_reel.upload_to_drive).
   9. Write Reel MP4 URL + Status="Ready to Post" back to the row.
 
@@ -502,7 +503,8 @@ def build_reel_for_row(row: dict) -> Path:
     )
 
     # Viral hook opener (viralhooks.org): the whole hook clip plays first,
-    # full-screen with the card on top, then the normal body. Best-effort by
+    # full-screen and CLEAN (the card appears only when the body starts —
+    # user's call 2026-07-19), then the normal body. Best-effort by
     # contract — fetch_hook_for_topic returns None on ANY failure and the
     # reel builds exactly as before. Deterministic per Topic (re-runs pick
     # the same hook). Kill-switch: DISABLE_VIRAL_HOOK=1.

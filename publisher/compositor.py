@@ -8,9 +8,11 @@ Stacks three layers onto a 1080x1920 black canvas:
 
 Optionally (build(..., hook_video=...)) the reel OPENS with a viral hook
 clip from viralhooks.org (see publisher/hook_opener.py): the whole hook
-plays full-screen (cover-cropped to the canvas) with the tweet card
-overlaid, then hard-cuts into the body above. The body's cap shrinks by
-the hook's duration so the total still respects max_seconds.
+plays full-screen (cover-cropped to the canvas) with NO overlay — the
+tweet card only appears when the body starts (user's call, 2026-07-19:
+keep the hook clean). Then it hard-cuts into the body above. The body's
+cap shrinks by the hook's duration so the total still respects
+max_seconds.
 
 Audio: if the source video HAS an audio track, the reel keeps it —
 preceded by `preview_seconds` of silence so it lines up with the poster
@@ -165,8 +167,9 @@ def build(
     """Composite the reel and write `out_path`. Returns the output path.
 
     With `hook_video` set, the WHOLE hook clip plays first (full-screen,
-    tweet card overlaid), then the normal body; without it the output is
-    byte-for-byte the same build as before the hook feature existed.
+    clean — no card), then the normal body with the card; without it the
+    output is byte-for-byte the same build as before the hook feature
+    existed.
     """
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -195,7 +198,7 @@ def build(
     # artifact glob (renders/*-tweet.mp4) never picks up an intermediate.
     hook_seg = out_path.with_name(out_path.stem + "_hookseg.mp4")
     body_seg = out_path.with_name(out_path.stem + "_bodyseg.mp4")
-    _build_hook_segment(hook_video, card_png, hook_seg, seconds=hook_dur)
+    _build_hook_segment(hook_video, hook_seg, seconds=hook_dur)
     # force_audio: the hook segment always has an audio track, so the body
     # must too (even if the source clip is silent) or the concat desyncs.
     _render_body(
@@ -214,32 +217,30 @@ def build(
 
 def _build_hook_segment(
     hook_mp4: Path,
-    card_png: Path,
     out_path: Path,
     *,
     seconds: float,
 ) -> Path:
     """Render the opener: the whole hook clip cover-cropped to the full
-    canvas with the tweet card overlaid on top, keeping the hook's own
-    audio (impact sounds are part of the attention grab; silence if the
-    file has none). Encoded with the exact same params as the body so the
-    final concat is a clean stream copy."""
+    canvas, CLEAN — no tweet card (the card only appears once the body
+    starts; user's call 2026-07-19). Keeps the hook's own audio (impact
+    sounds are part of the attention grab; silence if the file has none).
+    Encoded with the exact same params as the body so the final concat is
+    a clean stream copy."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
     keep_audio = has_audio(hook_mp4)
 
     video_graph = (
         f"[0:v]{_COVER_FILTER},fps=30,trim=duration={seconds:.2f},"
-        f"setpts=PTS-STARTPTS[full];"
-        f"[full][1:v]overlay=x={CARD_X}:y={CARD_Y}:format=auto[v]"
+        f"setpts=PTS-STARTPTS[v]"
     )
 
     cmd = [
         _resolve_ffmpeg(), "-y", "-loglevel", "warning",
         "-i", str(hook_mp4),
-        "-i", str(card_png),
     ]
     if not keep_audio:
-        # Input 2: silence, so this segment still carries an audio track.
+        # Input 1: silence, so this segment still carries an audio track.
         cmd += [
             "-f", "lavfi", "-t", f"{seconds:.2f}",
             "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
@@ -253,7 +254,7 @@ def _build_hook_segment(
             "-map", "[v]", "-map", "[a]",
         ]
     else:
-        cmd += ["-filter_complex", video_graph, "-map", "[v]", "-map", "2:a"]
+        cmd += ["-filter_complex", video_graph, "-map", "[v]", "-map", "1:a"]
 
     cmd += [
         "-c:v", "libx264", "-preset", "fast", "-crf", "20",

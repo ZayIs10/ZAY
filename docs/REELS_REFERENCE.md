@@ -21,8 +21,9 @@ footage is real (a product demo / the actual thing happening). This format is
 - Canvas: **1080 × 1920** (9:16, vertical).
 - **Viral hook opener (added 2026-07-19, user-requested):** every reel OPENS
   with one whole hook clip from **viralhooks.org** (~3–8s of scroll-stopping
-  footage — bike crash, watermelon split, …) playing **full-screen** with the
-  tweet card already overlaid, then hard-cuts into the normal body below.
+  footage — bike crash, watermelon split, …) playing **full-screen and CLEAN
+  (no tweet card — user's call, same day)**, then hard-cuts into the normal
+  body below, where the card appears.
   Picked deterministically per Topic from the site's ~340-hook library
   (`publisher/hook_opener.py`). Best-effort: if the site is down the reel
   builds without it. Env: `DISABLE_VIRAL_HOOK=1` to turn off,
@@ -161,7 +162,7 @@ publisher/tweet_card_reel.py  --row N      ← the orchestrator
    │       (viralhooks.org, free direct MP4; best-effort — reel builds
    │        without it on any failure; no proxy needed)
    ├─ 7. Composite the mp4            → publisher/compositor.py
-   │       (hook full-screen first, then poster + clip; card on top of all)
+   │       (hook full-screen first, NO card; then poster + clip with card)
    ├─ 8. Upload to Google Drive        → publisher/publish_reel.py
    └─ 9. Write "Reel MP4 URL" + Status = "Ready to Post" back to the row
 ```
@@ -231,8 +232,9 @@ it to review a design change before shipping.
 ## 7. Quick review checklist
 
 When reviewing a finished reel, check:
-- [ ] Opens with a viral hook clip, full-screen, card readable on top (if
-      it's missing, check the Actions log for "viral hook:" warnings).
+- [ ] Opens with a viral hook clip, full-screen and CLEAN — no card until
+      the body starts (if the hook is missing entirely, check the Actions
+      log for "viral hook:" warnings).
 - [ ] Card text is readable, not truncated mid-thought (if it is, shorten the
       caption or raise `max_lines`/card height).
 - [ ] Real footage fills the 960×900 rect — no bars, not stretched.
