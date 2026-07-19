@@ -7,7 +7,7 @@
 > you change a number here, change it in the file noted beside it (and vice
 > versa) so this doc never lies.
 
-Last verified against code: **2026-06-06**
+Last verified against code: **2026-07-19**
 
 ---
 
@@ -19,9 +19,18 @@ footage is real (a product demo / the actual thing happening). This format is
 **LOCKED** — approved 2026-06-03, do not redesign without being asked.
 
 - Canvas: **1080 × 1920** (9:16, vertical).
-- Duration: **video length + 1s poster intro, capped at 60s.**
-- Audio: keeps the **source clip's own audio** (no voiceover/TTS). Silent only
-  if the source has no audio track.
+- **Viral hook opener (added 2026-07-19, user-requested):** every reel OPENS
+  with one whole hook clip from **viralhooks.org** (~3–8s of scroll-stopping
+  footage — bike crash, watermelon split, …) playing **full-screen** with the
+  tweet card already overlaid, then hard-cuts into the normal body below.
+  Picked deterministically per Topic from the site's ~340-hook library
+  (`publisher/hook_opener.py`). Best-effort: if the site is down the reel
+  builds without it. Env: `DISABLE_VIRAL_HOOK=1` to turn off,
+  `VIRAL_HOOK_SLUG=<name>` to force one.
+- Duration: **hook (if any) + 1s poster intro + video, capped at 60s** (the
+  body's share shrinks by the hook's length).
+- Audio: the hook's own audio during the hook, then the **source clip's own
+  audio** (no voiceover/TTS). Silent only if the source has no audio track.
 - A reel **MUST use real video**. If no clip can be found/downloaded, the post
   is **SKIPPED** — we never ship a still / Ken Burns image.
 - Single clip, **no multi-beat clipping** (multi-beat was tried 2026-06-05 and
@@ -148,9 +157,13 @@ publisher/tweet_card_reel.py  --row N      ← the orchestrator
    ├─ 3. No video clip?  → Status = "Skipped - No Video"  (STOP, no still)
    ├─ 4. Download clip + poster       → publisher/media_consumer.py
    ├─ 5. Render the tweet card PNG     → publisher/tweet_card.py
-   ├─ 6. Composite the mp4            → publisher/compositor.py
-   ├─ 7. Upload to Google Drive        → publisher/publish_reel.py
-   └─ 8. Write "Reel MP4 URL" + Status = "Ready to Post" back to the row
+   ├─ 6. Fetch viral hook opener       → publisher/hook_opener.py
+   │       (viralhooks.org, free direct MP4; best-effort — reel builds
+   │        without it on any failure; no proxy needed)
+   ├─ 7. Composite the mp4            → publisher/compositor.py
+   │       (hook full-screen first, then poster + clip; card on top of all)
+   ├─ 8. Upload to Google Drive        → publisher/publish_reel.py
+   └─ 9. Write "Reel MP4 URL" + Status = "Ready to Post" back to the row
 ```
 
 ### Status state machine (prevents duplicate renders)
@@ -174,6 +187,8 @@ word (`Ready to Post`) so a re-poll never re-triggers a finished row.
 | Card text, fonts, sizes, colors, signoff | **`publisher/tweet_card.py`** |
 | Card / video position & size on the canvas | **`publisher/compositor.py`** (constants) |
 | Video crop, audio handling, duration cap, encoding | **`publisher/compositor.py`** (`build()`) |
+| Viral hook opener (source site, pick rule, bounds) | **`publisher/hook_opener.py`** |
+| Hook full-screen render / concat with the body | **`publisher/compositor.py`** (`_build_hook_segment`) |
 | The build order / what counts as "ready", skip rules | **`publisher/tweet_card_reel.py`** |
 | How media (clip + poster) is found | `publisher/media_finder.py` + `media_sources/` |
 | How clips are downloaded / trimmed | `publisher/media_consumer.py` |
@@ -216,6 +231,8 @@ it to review a design change before shipping.
 ## 7. Quick review checklist
 
 When reviewing a finished reel, check:
+- [ ] Opens with a viral hook clip, full-screen, card readable on top (if
+      it's missing, check the Actions log for "viral hook:" warnings).
 - [ ] Card text is readable, not truncated mid-thought (if it is, shorten the
       caption or raise `max_lines`/card height).
 - [ ] Real footage fills the 960×900 rect — no bars, not stretched.

@@ -22,6 +22,11 @@ Verified 2026-07-04. When an automation changes shape, update THIS file.
 - **Entry:** `python publisher/tweet_card_reel.py --topic "$TOPIC"` — selects
   the row by **Topic string**, never row number
 - **Logic:** `publisher/tweet_card.py` (card render) ·
+  `publisher/hook_opener.py` (viral hook opener: one whole clip from
+  viralhooks.org's ~340-hook free library plays FULL-SCREEN first, card
+  overlaid, then the body; deterministic per Topic; best-effort — never
+  fails a build; `DISABLE_VIRAL_HOOK=1` kills it, `VIRAL_HOOK_SLUG` forces
+  one; plain HTTPS, no proxy) ·
   `publisher/media_finder.py` + `publisher/media_sources/` (clip pick:
   `youtube.py`, `scoring.py` — relevance −60 sink, `transcript_picker.py`,
   `pexels.py`, `google_images.py`, `brand_official.py`) ·

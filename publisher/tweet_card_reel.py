@@ -10,9 +10,12 @@ Pipeline:
   3. Download the source video (yt-dlp / HTTP).
   4. Download the poster image.
   5. Render the tweet-card PNG (publisher/tweet_card.py).
-  6. Composite the final mp4 (publisher/compositor.py).
-  7. Upload to Drive (reuse publisher/publish_reel.upload_to_drive).
-  8. Write Reel MP4 URL + Status="Ready to Post" back to the row.
+  6. Fetch a viral hook opener clip (publisher/hook_opener.py,
+     viralhooks.org — best-effort, reel builds without it on failure).
+  7. Composite the final mp4 (publisher/compositor.py): whole hook
+     full-screen first, then poster intro + clip, card overlaid on all.
+  8. Upload to Drive (reuse publisher/publish_reel.upload_to_drive).
+  9. Write Reel MP4 URL + Status="Ready to Post" back to the row.
 
 If anything fails: row Status is set to "Render Failed" with the
 error truncated into the Media Status cell for debugging.
@@ -498,12 +501,31 @@ def build_reel_for_row(row: dict) -> Path:
         out_path=card_png,
     )
 
+    # Viral hook opener (viralhooks.org): the whole hook clip plays first,
+    # full-screen with the card on top, then the normal body. Best-effort by
+    # contract — fetch_hook_for_topic returns None on ANY failure and the
+    # reel builds exactly as before. Deterministic per Topic (re-runs pick
+    # the same hook). Kill-switch: DISABLE_VIRAL_HOOK=1.
+    hook_path = None
+    try:
+        from publisher.hook_opener import fetch_hook_for_topic  # noqa: E402
+        hook_path = fetch_hook_for_topic(topic, TMP_DIR)
+    except Exception as exc:  # noqa: BLE001 — hook must never kill a build
+        log.warning("viral hook: unavailable (%s) — building without an "
+                    "opener.", exc)
+    if hook_path:
+        log.info("Viral hook opener: %s", Path(hook_path).name)
+    else:
+        log.info("No viral hook opener this build (disabled or "
+                 "unavailable) — rendering the plain reel.")
+
     out_mp4 = RENDERS_DIR / f"{slug}-tweet.mp4"
     log.info("Compositing reel (video) -> %s", out_mp4.name)
     composite_reel(
         card_png, source_video, poster_path, out_mp4,
         preview_seconds=1.0,
         max_seconds=60.0,
+        hook_video=hook_path,
     )
 
     if not out_mp4.exists() or out_mp4.stat().st_size == 0:
