@@ -9,10 +9,12 @@ Run via scheduler: handled by scheduler.py
 """
 
 import base64
+import functools
 import io
 import json
 import logging
 import os
+import random
 import re
 import sys
 import time
@@ -172,6 +174,74 @@ def setup_logging(config: dict) -> None:
 # Step 1: Read next "Ready" topic from Google Sheets
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Google Sheets quota resilience
+# ---------------------------------------------------------------------------
+# The Sheets API allows only 60 reads + 60 writes per MINUTE per user, and one
+# service account is shared by every automation (reels, carousels, publish
+# cron, research). A build makes dozens of tiny calls, so bursts hit
+# "[429]: Quota exceeded ... Read requests per minute per user" — which used to
+# kill an otherwise-healthy render mid-way (and strand the row at "Building").
+#
+# Two defences, both needed:
+#   1. _col_index caches the header row, so a cell write costs 0 reads instead
+#      of 1. That removes the bulk of the traffic at the source.
+#   2. _RetryingWorksheet waits out the per-minute window instead of crashing.
+
+_RETRY_STATUSES = {429, 500, 502, 503, 504}
+
+
+def _api_status(exc: Exception) -> int | None:
+    """HTTP status behind a gspread APIError, or None if it isn't one."""
+    code = getattr(getattr(exc, "response", None), "status_code", None)
+    if isinstance(code, int):
+        return code
+    m = re.search(r"\[(\d{3})\]", str(exc))  # APIError renders as "[429]: ..."
+    return int(m.group(1)) if m else None
+
+
+class _RetryingWorksheet:
+    """Transparent gspread Worksheet proxy that retries quota/transient errors.
+
+    Wrapping the worksheet (rather than each call site) means every existing
+    `reader.ws.<anything>(...)` in the repo is protected for free. Waits are
+    long because the quota window is per-minute — a short retry storm would
+    just burn the remaining budget.
+    """
+
+    def __init__(self, ws, *, attempts: int = 6, base_delay: float = 5.0):
+        self._ws = ws
+        self._attempts = attempts
+        self._base_delay = base_delay
+
+    def __getattr__(self, name: str):
+        attr = getattr(self._ws, name)
+        if not callable(attr):
+            return attr
+
+        @functools.wraps(attr)
+        def _wrapped(*args, **kwargs):
+            for attempt in range(1, self._attempts + 1):
+                try:
+                    return attr(*args, **kwargs)
+                except gspread.exceptions.APIError as exc:
+                    status = _api_status(exc)
+                    if status not in _RETRY_STATUSES or attempt == self._attempts:
+                        raise
+                    # Cap at 60s: the quota window is one minute, so waiting
+                    # longer than that buys nothing. Jitter decorrelates
+                    # workflows that fire on the same cron.
+                    delay = min(self._base_delay * (2 ** (attempt - 1)), 60.0)
+                    delay += random.uniform(0, 1.5)
+                    logging.warning(
+                        "Sheets API %s on %s (attempt %d/%d) — retrying in %.1fs",
+                        status, name, attempt, self._attempts, delay)
+                    time.sleep(delay)
+            raise AssertionError("unreachable")  # loop either returns or raises
+
+        return _wrapped
+
+
 class SheetsReader:
     SCOPES = [
         "https://spreadsheets.google.com/feeds",
@@ -187,7 +257,9 @@ class SheetsReader:
             creds_path, scopes=self.SCOPES)
         self.gc = gspread.authorize(creds)
         sh = self.gc.open_by_key(self.cfg["spreadsheet_id"])
-        self.ws = sh.worksheet(self.cfg["sheet_name"])
+        self.ws = _RetryingWorksheet(sh.worksheet(self.cfg["sheet_name"]))
+        self._headers: list[str] | None = None
+        self._headers_refreshed = False
 
     def get_next_ready_row(self) -> dict | None:
         """Returns the first row where Status='Ready', or None."""
@@ -227,8 +299,21 @@ class SheetsReader:
         self.ws.update_cell(row_index, post_id_col, post_id)
 
     def _col_index(self, header: str) -> int:
-        headers = self.ws.row_values(1)
-        return headers.index(header) + 1  # gspread is 1-indexed
+        """1-based column number for `header` — cached for the whole run.
+
+        This used to re-read row 1 from the API on EVERY call, i.e. one read
+        per cell write. A single reel build fired ~20 of them in seconds and
+        tripped the 60-reads-per-minute quota. The header row can't change
+        mid-run, so it's read once; a miss refreshes it exactly once more in
+        case a column was added while the run was in flight. Still raises
+        ValueError for a genuinely absent column (callers rely on that).
+        """
+        if self._headers is None:
+            self._headers = self.ws.row_values(1)
+        if header not in self._headers and not self._headers_refreshed:
+            self._headers = self.ws.row_values(1)
+            self._headers_refreshed = True
+        return self._headers.index(header) + 1  # gspread is 1-indexed
 
 
 # ---------------------------------------------------------------------------

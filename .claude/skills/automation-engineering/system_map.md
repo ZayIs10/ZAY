@@ -170,6 +170,24 @@ that side's run.
 
 ## Known traps (confirm before re-applying an old fix)
 
+- **Sheets 429 "Quota exceeded ... Read requests per minute per user":** the
+  quota is 60 reads + 60 writes per MINUTE for the WHOLE service account,
+  shared by every automation. n8n fans out one `repository_dispatch` per
+  ready row, so 9 reel builds can start in the same second (seen
+  2026-07-27) and collectively blow the quota. Fixed 2026-07-27 in
+  `SheetsReader`: `_col_index` caches the header row (it used to re-read
+  row 1 on EVERY cell write — ~20 reads per build, now ~1), and
+  `_RetryingWorksheet` wraps the worksheet so any 429/5xx backs off up to
+  ~135s instead of crashing. Do NOT "fix" a recurrence by adding a
+  workflow-level `concurrency:` group — GitHub keeps only 1 pending run and
+  CANCELS the rest, silently dropping topics. Cut read volume instead.
+
+- **A crash between the claim and the render strands the row at
+  "Building":** the poll only looks for `Ready to Run`, so a stranded topic
+  silently never builds again (5 rows sat dead this way on 2026-07-27).
+  Every step after `_try_update(..., CLAIM_STATUS)` must be inside the
+  try/except that marks `Render Failed`.
+
 - **A "best-effort" try/except can hide a MISSING MODULE for weeks:**
   `transcript_picker.py` lived only on a side branch until 2026-07-04; on
   main every build's transcript import raised ImportError, was swallowed as

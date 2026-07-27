@@ -34,6 +34,7 @@ import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import gspread
 from dotenv import load_dotenv
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -241,12 +242,21 @@ def _find_row_by_topic(reader: SheetsReader, topic: str) -> dict:
 
 
 def _try_update(reader: SheetsReader, row_index: int, header: str, value: str) -> None:
-    """Best-effort cell update — log + skip if the column doesn't exist."""
+    """Best-effort cell update — log + skip if the column doesn't exist.
+
+    Also swallows a Sheets APIError (quota/5xx) that survived the retries in
+    SheetsReader: a cosmetic cell write must never take down a render that is
+    otherwise fine. Status writes go through here too, so failures are logged
+    loudly rather than silently.
+    """
     try:
         col = reader._col_index(header)
         reader.ws.update_cell(row_index, col, value)
     except (ValueError, IndexError) as exc:
         log.warning("Could not update column %r: %s", header, exc)
+    except gspread.exceptions.APIError as exc:
+        log.error("Sheets write failed for column %r (row %d): %s",
+                  header, row_index, exc)
 
 
 def _mark_failed(reader: SheetsReader, row_index: int, msg: str) -> None:
@@ -567,24 +577,37 @@ def run(row_index: int | None, *, topic: str | None = None, dry_run: bool) -> in
     # into "Media Video URL" so every downstream step (skip-check, staging,
     # the sheet itself) reflects what's actually used. Auto-search below only
     # runs for rows where YouTube URL was left blank.
-    row = _prefer_sheet_youtube_url(reader, row_index, row, dry_run=dry_run)
+    # Everything between the claim and the render is wrapped: the row is
+    # already marked "Building", so an uncaught error here would strand it in
+    # that state forever — the next poll only looks for "Ready to Run", so the
+    # topic would silently never build again. (This is exactly what a Sheets
+    # 429 mid-caption-write did on 2026-07-27.) Failing to "Render Failed"
+    # keeps the row visible and re-runnable.
+    try:
+        row = _prefer_sheet_youtube_url(reader, row_index, row, dry_run=dry_run)
 
-    # Self-serve media: if the row has a Topic but no Media Video URL, find a
-    # clip here (keyless: yt-dlp + Pexels + brand scrape). This means a row only
-    # needs Topic + "Ready to Run" — no dependency on n8n's YouTube-API search,
-    # which is the part that keeps breaking ($env block, Merge config).
-    # Only the VIDEO matters: the poster is derived from the video thumbnail at
-    # render time, so a missing Media Image URL never triggers a re-search.
-    if not row.get("Media Video URL", "").strip():
-        row = _ensure_media(reader, row_index, row, dry_run=dry_run)
+        # Self-serve media: if the row has a Topic but no Media Video URL, find a
+        # clip here (keyless: yt-dlp + Pexels + brand scrape). This means a row only
+        # needs Topic + "Ready to Run" — no dependency on n8n's YouTube-API search,
+        # which is the part that keeps breaking ($env block, Merge config).
+        # Only the VIDEO matters: the poster is derived from the video thumbnail at
+        # render time, so a missing Media Image URL never triggers a re-search.
+        if not row.get("Media Video URL", "").strip():
+            row = _ensure_media(reader, row_index, row, dry_run=dry_run)
 
-    # Self-serve captions: if the row was seeded bare (Topic + "Ready to Run"
-    # only), generate the Reel Caption + Post Caption here (free, no OpenAI),
-    # grounded in the source video's transcript when there is one. Runs AFTER
-    # media so even an auto-found clip can ground the copy. This is why the
-    # "missing required fields: Reel Caption / Post Caption" error no longer
-    # stops a bare row from building.
-    row = _ensure_captions(reader, row_index, row, dry_run=dry_run)
+        # Self-serve captions: if the row was seeded bare (Topic + "Ready to Run"
+        # only), generate the Reel Caption + Post Caption here (free, no OpenAI),
+        # grounded in the source video's transcript when there is one. Runs AFTER
+        # media so even an auto-found clip can ground the copy. This is why the
+        # "missing required fields: Reel Caption / Post Caption" error no longer
+        # stops a bare row from building.
+        row = _ensure_captions(reader, row_index, row, dry_run=dry_run)
+    except Exception as exc:
+        log.error("Prep failed before render: %s", exc)
+        log.debug(traceback.format_exc())
+        if not dry_run:
+            _mark_failed(reader, row_index, str(exc))
+        return 1
 
     # Hard rule: no real video clip -> SKIP the post (don't ship a still,
     # don't mark it Failed). Routes to the terminal SKIPPED_STATUS below.
