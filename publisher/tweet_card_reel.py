@@ -12,11 +12,12 @@ Pipeline:
   5. Render the tweet-card PNG (publisher/tweet_card.py).
   6. Fetch a viral hook opener clip (publisher/hook_opener.py,
      viralhooks.org — best-effort, reel builds without it on failure).
-  7. Composite the final mp4 (publisher/compositor.py): whole hook
+  7. Render the "comment SEND" CTA end-card (publisher/cta_endcard.py).
+  8. Composite the final mp4 (publisher/compositor.py): whole hook
      full-screen first (clean, no card), then poster intro + clip with
-     the tweet card overlaid.
-  8. Upload to Drive (reuse publisher/publish_reel.upload_to_drive).
-  9. Write Reel MP4 URL + Status="Ready to Post" back to the row.
+     the tweet card overlaid, then the CTA end-card.
+  9. Upload to Drive (reuse publisher/publish_reel.upload_to_drive).
+ 10. Write Reel MP4 URL + Status="Ready to Post" back to the row.
 
 If anything fails: row Status is set to "Render Failed" with the
 error truncated into the Media Status cell for debugging.
@@ -531,6 +532,20 @@ def build_reel_for_row(row: dict) -> Path:
         log.info("No viral hook opener this build (disabled or "
                  "unavailable) — rendering the plain reel.")
 
+    # CTA end-card: the `Comment "Send"` ask lives IN the reel now, because
+    # the same line in the Post Caption was not converting (user, 2026-07-31).
+    # A committed HyperFrames render (assets/cta/cta_send.mp4) — free, and
+    # the on-screen text is always spelled right. Best-effort by contract:
+    # endcard_for_reel returns None on ANY failure and the reel builds
+    # without it. Kill-switch: DISABLE_CTA_ENDCARD=1.
+    cta_path = None
+    try:
+        from publisher.cta_endcard import endcard_for_reel  # noqa: E402
+        cta_path = endcard_for_reel(TMP_DIR)
+    except Exception as exc:  # noqa: BLE001 — CTA must never kill a build
+        log.warning("CTA end-card: unavailable (%s) — building without it.",
+                    exc)
+
     out_mp4 = RENDERS_DIR / f"{slug}-tweet.mp4"
     log.info("Compositing reel (video) -> %s", out_mp4.name)
     composite_reel(
@@ -538,6 +553,7 @@ def build_reel_for_row(row: dict) -> Path:
         preview_seconds=1.0,
         max_seconds=60.0,
         hook_video=hook_path,
+        cta_endcard=cta_path,
     )
 
     if not out_mp4.exists() or out_mp4.stat().st_size == 0:

@@ -35,10 +35,16 @@ Verified 2026-07-04. When an automation changes shape, update THIS file.
   video's OPENING spoken lines via `transcript_picker.fetch_transcript` so
   the card matches the footage — the reel always shows the clip's first
   ~60s, so caption and clip come from the same part of the video) ·
+  `publisher/cta_endcard.py` (CTA end-card: 5s "comment SEND" Instagram-DM
+  animation appended to EVERY reel; the animation is a HyperFrames
+  composition at `reels/compositions/cta_send.html`, rendered LOCALLY and
+  committed as `assets/cta/cta_send.mp4` — CI only normalizes it, never
+  re-renders; best-effort; `DISABLE_CTA_ENDCARD=1` kills it) ·
   `publisher/notify_email.py`
   (Drive link + caption review email via Gmail SMTP)
-- **Format:** single clip + tweet-card overlay, LOCKED (multi-beat code in
-  `publisher/beats.py`/`beat_media.py` exists but is unused)
+- **Format:** viral hook (clean) → single clip + tweet-card overlay → CTA
+  end-card, LOCKED (multi-beat code in `publisher/beats.py`/`beat_media.py`
+  exists but is unused)
 - **State machine:** `Ready to Run` → `Building` → `Ready to Post`
 - **Output:** rendered MP4 → Google Drive (OAuth as genzcapital999; the
   service account has no storage quota)

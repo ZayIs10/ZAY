@@ -10,9 +10,13 @@ Optionally (build(..., hook_video=...)) the reel OPENS with a viral hook
 clip from viralhooks.org (see publisher/hook_opener.py): the whole hook
 plays full-screen (cover-cropped to the canvas) with NO overlay — the
 tweet card only appears when the body starts (user's call, 2026-07-19:
-keep the hook clean). Then it hard-cuts into the body above. The body's
-cap shrinks by the hook's duration so the total still respects
-max_seconds.
+keep the hook clean). Then it hard-cuts into the body above.
+
+Optionally (build(..., cta_endcard=...)) the reel CLOSES with the
+"comment SEND" call-to-action animation (see publisher/cta_endcard.py).
+
+The body's cap shrinks by the hook's and end-card's durations so the
+total still respects max_seconds.
 
 Audio: if the source video HAS an audio track, the reel keeps it —
 preceded by `preview_seconds` of silence so it lines up with the poster
@@ -163,51 +167,85 @@ def build(
     preview_seconds: float = 1.0,
     max_seconds: float = 60.0,
     hook_video: Path | None = None,
+    cta_endcard: Path | None = None,
 ) -> Path:
     """Composite the reel and write `out_path`. Returns the output path.
 
     With `hook_video` set, the WHOLE hook clip plays first (full-screen,
-    clean — no card), then the normal body with the card; without it the
-    output is byte-for-byte the same build as before the hook feature
-    existed.
+    clean — no card). With `cta_endcard` set, the "comment SEND" call-to-
+    action card is appended after the body. With neither, the output is
+    byte-for-byte the same build as before those features existed.
+
+    Both extras share the 60s cap with the body. If the body would be
+    squeezed under `_MIN_BODY_SECONDS`, the HOOK is dropped first (it's
+    decoration); the CTA is dropped only if that still isn't enough,
+    because the CTA is the whole point of the reel converting.
     """
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if hook_video is None:
+    if hook_video is None and cta_endcard is None:
         return _render_body(
             card_png, source_video, poster_image, out_path,
             preview_seconds=preview_seconds, max_seconds=max_seconds,
         )
 
-    hook_dur = probe_duration(hook_video)
-    body_max = max_seconds - hook_dur
-    if body_max < _MIN_BODY_SECONDS:
+    hook_dur = probe_duration(hook_video) if hook_video else 0.0
+    cta_dur = probe_duration(cta_endcard) if cta_endcard else 0.0
+
+    if max_seconds - hook_dur - cta_dur < _MIN_BODY_SECONDS and hook_video:
         log.warning(
-            "Hook is %.1fs — leaves under %.0fs of the %.0fs cap for the "
-            "body. Building WITHOUT the hook.",
-            hook_dur, _MIN_BODY_SECONDS, max_seconds,
+            "Hook (%.1fs) + CTA (%.1fs) leave under %.0fs of the %.0fs cap "
+            "for the body — dropping the HOOK.",
+            hook_dur, cta_dur, _MIN_BODY_SECONDS, max_seconds,
         )
+        hook_video, hook_dur = None, 0.0
+    if max_seconds - cta_dur < _MIN_BODY_SECONDS and cta_endcard:
+        log.warning(
+            "CTA end-card (%.1fs) leaves under %.0fs of the %.0fs cap for "
+            "the body — dropping the CTA too.",
+            cta_dur, _MIN_BODY_SECONDS, max_seconds,
+        )
+        cta_endcard, cta_dur = None, 0.0
+    if hook_video is None and cta_endcard is None:
         return _render_body(
             card_png, source_video, poster_image, out_path,
             preview_seconds=preview_seconds, max_seconds=max_seconds,
         )
 
-    log.info("Viral hook opener: %.1fs full-screen, body capped at %.1fs",
-             hook_dur, body_max)
+    body_max = max_seconds - hook_dur - cta_dur
+    log.info(
+        "Segments: hook %.1fs + body <=%.1fs + CTA %.1fs (cap %.0fs)",
+        hook_dur, body_max, cta_dur, max_seconds,
+    )
+
     # Segment names deliberately do NOT end in '-tweet.mp4' so the Actions
     # artifact glob (renders/*-tweet.mp4) never picks up an intermediate.
-    hook_seg = out_path.with_name(out_path.stem + "_hookseg.mp4")
+    segments: list[Path] = []
+    intermediates: list[Path] = []
+    if hook_video is not None:
+        hook_seg = out_path.with_name(out_path.stem + "_hookseg.mp4")
+        _build_hook_segment(hook_video, hook_seg, seconds=hook_dur)
+        segments.append(hook_seg)
+        intermediates.append(hook_seg)
+
     body_seg = out_path.with_name(out_path.stem + "_bodyseg.mp4")
-    _build_hook_segment(hook_video, hook_seg, seconds=hook_dur)
-    # force_audio: the hook segment always has an audio track, so the body
-    # must too (even if the source clip is silent) or the concat desyncs.
+    # force_audio: the other segments always carry an audio track, so the
+    # body must too (even if the source clip is silent) or concat desyncs.
     _render_body(
         card_png, source_video, poster_image, body_seg,
         preview_seconds=preview_seconds, max_seconds=body_max,
         force_audio=True,
     )
-    _concat_copy([hook_seg, body_seg], out_path)
-    for seg in (hook_seg, body_seg):
+    segments.append(body_seg)
+    intermediates.append(body_seg)
+
+    if cta_endcard is not None:
+        # Already encoded with this module's exact recipe by
+        # publisher/cta_endcard.py, so it concatenates as a stream copy.
+        segments.append(cta_endcard)
+
+    _concat_copy(segments, out_path)
+    for seg in intermediates:
         try:
             seg.unlink()
         except OSError:

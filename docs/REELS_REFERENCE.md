@@ -28,8 +28,22 @@ footage is real (a product demo / the actual thing happening). This format is
   (`publisher/hook_opener.py`). Best-effort: if the site is down the reel
   builds without it. Env: `DISABLE_VIRAL_HOOK=1` to turn off,
   `VIRAL_HOOK_SLUG=<name>` to force one.
-- Duration: **hook (if any) + 1s poster intro + video, capped at 60s** (the
-  body's share shrinks by the hook's length).
+- **CTA end-card (added 2026-07-31, user-requested):** every reel CLOSES with a
+  5s "comment SEND" animation on pure black — an Instagram DM thread where the
+  word **"Send"** is typed into the message bar letter by letter, the neon send
+  button is tapped, the bubble springs up, a typing indicator bounces, and a
+  reply slides in carrying the **YouTube link card**. Headline reads
+  *WANT THE FULL VIDEO? / COMMENT "SEND"*, footer *SENT STRAIGHT TO YOUR DMS*.
+  Why: the same ask written in the Post Caption was **not converting** — nobody
+  reads captions, so the CTA now plays on screen.
+  Built as a **HyperFrames composition** (`reels/compositions/cta_send.html`),
+  rendered locally and committed as `assets/cta/cta_send.mp4`; the build only
+  normalizes that asset (`publisher/cta_endcard.py`). CI never re-renders it,
+  so what you approved is exactly what ships. Env: `DISABLE_CTA_ENDCARD=1`.
+- Duration: **hook (if any) + 1s poster intro + video + 5s CTA, capped at 60s**
+  (the body's share shrinks by the hook's and CTA's length; if the body would
+  fall under 6s the **hook** is dropped first, the CTA last — the CTA is the
+  conversion mechanism, the hook is decoration).
 - Audio: the hook's own audio during the hook, then the **source clip's own
   audio** (no voiceover/TTS). Silent only if the source has no audio track.
 - A reel **MUST use real video**. If no clip can be found/downloaded, the post
@@ -161,10 +175,13 @@ publisher/tweet_card_reel.py  --row N      ← the orchestrator
    ├─ 6. Fetch viral hook opener       → publisher/hook_opener.py
    │       (viralhooks.org, free direct MP4; best-effort — reel builds
    │        without it on any failure; no proxy needed)
-   ├─ 7. Composite the mp4            → publisher/compositor.py
-   │       (hook full-screen first, NO card; then poster + clip with card)
-   ├─ 8. Upload to Google Drive        → publisher/publish_reel.py
-   └─ 9. Write "Reel MP4 URL" + Status = "Ready to Post" back to the row
+   ├─ 7. Prepare the CTA end-card      → publisher/cta_endcard.py
+   │       (normalizes the committed assets/cta/cta_send.mp4; best-effort)
+   ├─ 8. Composite the mp4            → publisher/compositor.py
+   │       (hook full-screen first, NO card; then poster + clip with card;
+   │        then the 5s comment-SEND CTA end-card)
+   ├─ 9. Upload to Google Drive        → publisher/publish_reel.py
+   └─ 10. Write "Reel MP4 URL" + Status = "Ready to Post" back to the row
 ```
 
 ### Status state machine (prevents duplicate renders)
@@ -190,6 +207,8 @@ word (`Ready to Post`) so a re-poll never re-triggers a finished row.
 | Video crop, audio handling, duration cap, encoding | **`publisher/compositor.py`** (`build()`) |
 | Viral hook opener (source site, pick rule, bounds) | **`publisher/hook_opener.py`** |
 | Hook full-screen render / concat with the body | **`publisher/compositor.py`** (`_build_hook_segment`) |
+| **CTA end-card look/motion** (chat UI, typing, link card) | **`reels/compositions/cta_send.html`** — then re-render (below) |
+| CTA wiring / normalize / kill-switch | **`publisher/cta_endcard.py`** |
 | The build order / what counts as "ready", skip rules | **`publisher/tweet_card_reel.py`** |
 | How media (clip + poster) is found | `publisher/media_finder.py` + `media_sources/` |
 | How clips are downloaded / trimmed | `publisher/media_consumer.py` |
@@ -197,6 +216,26 @@ word (`Ready to Post`) so a re-poll never re-triggers a finished row.
 | Cloud build (env, secrets, steps) | **`.github/workflows/build_tweet_card_reel.yml`** |
 | Drive upload | `publisher/publish_reel.py` |
 | Caption/script wording the AI writes | `scripts/research_topic.py` (the GPT prompt) |
+
+### Re-rendering the CTA end-card (after editing the composition)
+
+The CTA is a committed video asset, not something CI generates — edit the
+HTML, re-render locally, then commit the new MP4:
+
+```bash
+cd reels
+npx hyperframes lint                                    # must be clean
+npx hyperframes render -c compositions/cta_send.html \
+    -o renders/cta_send.mp4 --workers 2 --quality high  # ~30s
+cp renders/cta_send.mp4 ../assets/cta/cta_send.mp4
+cd .. && git add -f assets/cta/cta_send.mp4             # -f: *.mp4 is ignored
+```
+
+Rules that keep it concat-safe: **1080×1920, 30 fps, exactly 5s**, pure black
+background. Do NOT add audio — `publisher/cta_endcard.py` attaches the silent
+stereo track and re-encodes to the compositor's recipe. Motion must be GSAP
+tweens on the registered paused timeline (CSS `@keyframes` run on wall-clock
+and tear during frame capture), and no `Date.now()` / `Math.random()`.
 
 ### Sheet columns the reel build reads / writes
 - **Reads:** `Topic`, `Post Caption`, `Media Video URL`, `Media Image URL`,
