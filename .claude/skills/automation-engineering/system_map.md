@@ -16,15 +16,24 @@ Verified 2026-07-04. When an automation changes shape, update THIS file.
 ## Tweet-card reels (build)
 
 - **Trigger:** n8n `repository_dispatch` when a `reels`-tab row hits `Ready to Run`
-- **Runner:** `.github/workflows/build_tweet_card_reel.yml` on the self-hosted
-  Windows runner `[self-hosted, windows, genz-pc]` = the user's own PC, home IP,
-  FREE, pwsh steps (restored 2026-08-02; the DataImpulse proxy ran dry and its
-  dashboard now demands a $50 minimum top-up vs the $5 advertised, so the
-  `ubuntu-latest` + `PROXY_URL` path of 2026-06-30 is parked, not deleted —
-  `git show b603322` has the bash steps). PROXY_URL is deliberately NOT passed
-  on the self-hosted path: the secret still exists with an empty balance, and
-  passing it would 407 every download instead of going out direct. PC off ⇒ the
-  job queues and runs when it comes online; only 24h with no runner fails it.
+- **Runner: chosen AT RUNTIME — do NOT hand-flip this file** (cae728d,
+  2026-08-02). `.github/workflows/build_tweet_card_reel.yml` has 3 jobs:
+  - `probe` — ubuntu-latest, ~20s. Can `PROXY_URL` pass traffic right now?
+    Probes **plain `http://` FIRST** (the only readable signal: providers return
+    their refusal as an HTTP body, while https:// dies at the TLS handshake with
+    curl exit 35 / `http_code=000` and no message), then requires **https:// →
+    204** since yt-dlp only talks HTTPS to YouTube. Outputs `cloud=true|false`.
+  - `cloud` — ubuntu-latest **with** `PROXY_URL` (Thordata residential), when the
+    probe says alive. **The user's PC can be OFF.**
+  - `pc` — `[self-hosted, windows, genz-pc]` = the user's own PC, home IP, FREE,
+    pwsh steps, **deliberately WITHOUT `PROXY_URL`** (a dead proxy would 407
+    every download instead of going out direct). Runs when the proxy is
+    dead/unset **or** the cloud job failed. Its `if:` needs `always()` or GitHub
+    skips it whenever `cloud` is skipped. PC off ⇒ the job queues and runs when
+    it comes online; only 24h with no runner fails it.
+  Why: hand-flipping between the two modes caused an outage every time, and
+  Thordata's traffic expires ~30 days so the correct runner changes by itself.
+  Topping up ⇒ cloud, with no code change; running dry ⇒ free PC, not a parked row.
 - **Entry:** `python publisher/tweet_card_reel.py --topic "$TOPIC"` — selects
   the row by **Topic string**, never row number
 - **Logic:** `publisher/tweet_card.py` (card render) ·
