@@ -1,0 +1,34 @@
+name: TEMP - Probe ffmpeg proxy support
+
+# TEMPORARY diagnostic (delete after use): does the apt ffmpeg on
+# ubuntu-latest route HTTPS through the proxy given via env http_proxy —
+# the exact mechanism yt-dlp's FFmpegFD uses? While the DataImpulse
+# account is out of traffic, its "407 TRAFFIC_EXHAUSTED" answer is a
+# perfect tracer: seeing a 4XX-proxy error proves the request tunneled
+# through the proxy; "Invalid data found" proves a DIRECT connection
+# (proxy ignored).
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PROXY_URL: ${{ secrets.PROXY_URL }}
+    steps:
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Probe
+        run: |
+          ffmpeg -version | head -1
+          echo "=== TEST 1: direct https (expect: Invalid data found = connected) ==="
+          ffmpeg -v error -i "https://www.google.com/" 2>&1 | head -3 || true
+          echo "=== TEST 2: env http_proxy only, FFmpegFD-style (expect 4XX = proxied) ==="
+          http_proxy="$PROXY_URL" HTTP_PROXY="$PROXY_URL" ffmpeg -v error -i "https://www.google.com/" 2>&1 | head -3 || true
+          echo "=== TEST 3: -http_proxy option (expect 4XX = proxied) ==="
+          ffmpeg -v error -http_proxy "$PROXY_URL" -i "https://www.google.com/" 2>&1 | head -3 || true
