@@ -270,8 +270,65 @@ def _try_update(reader: SheetsReader, row_index: int, header: str, value: str) -
                   header, row_index, exc)
 
 
+# The Reels tab carries TWO status-ish columns: the live `Status` at index 42
+# (far right, OFF-SCREEN) and this legacy one at index 5 = column F, left over
+# from the old Instagram-post pipeline. The user works in the visible one.
+LEGACY_STATUS_HEADER = "Published"
+
+# Every status word this pipeline owns. A `Published` cell holding one of these
+# is really a reel status typed into the wrong column, so it is safe to mirror.
+# Anything else there — notably the literal "Published" from the old Instagram
+# pipeline, or a hand-written note — is left completely alone.
+_REEL_STATUS_WORDS = {
+    TRIGGER_STATUS,                    # already lowercase: "ready to run"
+    CLAIM_STATUS.lower(),
+    DONE_STATUS.lower(),
+    SKIPPED_STATUS.lower(),
+    PROXY_EMPTY_STATUS.lower(),
+    "render failed",
+    "draft",
+}
+
+
+def _set_status(reader: SheetsReader, row_index: int, value: str) -> None:
+    """Write the live `Status`, and MIRROR it into the legacy `Published`
+    column whenever that cell is being used as a reel status.
+
+    Why this exists (2026-08-02): the user flips the VISIBLE column F to
+    "Ready to Run", but the build only ever wrote the off-screen `Status`. So a
+    finished reel appeared never to leave "Ready to Run" — the user's original
+    complaint — and worse, the LIVE n8n gate (drifted from the committed JSON)
+    latched onto column F. Because a column the build never touched could not
+    change, every sheet write re-opened the gate and re-dispatched the same
+    topic about once a minute.
+
+    Mirroring fixes both at once: whichever column the user reads now shows the
+    truth, and the stale trigger word in column F is overwritten, so the gate
+    closes on its own. Telling the user "look at the other column" would have
+    been manual work; this makes either column correct.
+    """
+    _try_update(reader, row_index, "Status", value)
+    try:
+        col = reader._col_index(LEGACY_STATUS_HEADER)
+        current = (reader.ws.cell(row_index, col).value or "").strip()
+    except (ValueError, IndexError, gspread.exceptions.APIError) as exc:
+        # No such column, or a transient Sheets error — the live Status write
+        # above already succeeded, so this is cosmetic. Never fail a render.
+        log.debug("Legacy %r column not mirrored: %s", LEGACY_STATUS_HEADER, exc)
+        return
+    if current.lower() not in _REEL_STATUS_WORDS:
+        return          # not ours (blank / "Published" / a note) — hands off
+    if current == value:
+        return          # already correct; skip the write (every write is a
+                        # row change on n8n's next poll = potential loop fuel)
+    _try_update(reader, row_index, LEGACY_STATUS_HEADER, value)
+    log.info("Mirrored Status into the legacy %r column (%r -> %r) so the "
+             "visible column matches and the n8n gate closes.",
+             LEGACY_STATUS_HEADER, current, value)
+
+
 def _mark_failed(reader: SheetsReader, row_index: int, msg: str) -> None:
-    _try_update(reader, row_index, "Status", "Render Failed")
+    _set_status(reader, row_index, "Render Failed")
     _try_update(reader, row_index, "Media Status", msg[:200])
 
 
@@ -619,7 +676,7 @@ def run(row_index: int | None, *, topic: str | None = None, dry_run: bool,
         # One write per row, once — the guard then short-circuits silently.
         current = str(row.get("Status", "")).strip()
         if not dry_run and current != DONE_STATUS:
-            _try_update(reader, row_index, "Status", DONE_STATUS)
+            _set_status(reader, row_index, DONE_STATUS)
             log.info("Repaired status of finished row: %r -> %r.",
                      current or "(blank)", DONE_STATUS)
         return 0
@@ -627,7 +684,7 @@ def run(row_index: int | None, *, topic: str | None = None, dry_run: bool,
     # Claim the row IMMEDIATELY so a re-poll (n8n fires every minute) sees
     # "Building", not "Ready to Run", and won't kick off a duplicate render.
     if not dry_run:
-        _try_update(reader, row_index, "Status", CLAIM_STATUS)
+        _set_status(reader, row_index, CLAIM_STATUS)
 
     # USER'S HAND-PICKED CLIP WINS. If the row's "YouTube URL" column is filled
     # (the link chosen when the topic was created), use THAT exact video and
@@ -678,7 +735,7 @@ def run(row_index: int | None, *, topic: str | None = None, dry_run: bool,
                f"{row.get('Topic', '')!r} — post skipped.")
         log.warning(msg)
         if not dry_run:
-            _try_update(reader, row_index, "Status", SKIPPED_STATUS)
+            _set_status(reader, row_index, SKIPPED_STATUS)
             _try_update(reader, row_index, "Media Status", msg[:200])
             _alert_no_video(row, row_index, msg)
         return 0
@@ -694,7 +751,7 @@ def run(row_index: int | None, *, topic: str | None = None, dry_run: bool,
         # not a failure/retry) AND alert the user so it's never silent.
         log.warning("Skipping row %d — no usable video: %s", row_index, exc)
         if not dry_run:
-            _try_update(reader, row_index, "Status", SKIPPED_STATUS)
+            _set_status(reader, row_index, SKIPPED_STATUS)
             _try_update(reader, row_index, "Media Status", str(exc)[:200])
             _alert_no_video(row, row_index, str(exc))
         return 0
@@ -733,7 +790,7 @@ def run(row_index: int | None, *, topic: str | None = None, dry_run: bool,
         datetime.now(timezone(timedelta(hours=8))).strftime(
             "%Y-%m-%d %H:%M:%S"),
     )
-    _try_update(reader, row_index, "Status", DONE_STATUS)
+    _set_status(reader, row_index, DONE_STATUS)
 
     # DO NOT publish to Instagram here. The IG API can't truly schedule (sending
     # scheduled_publish_time is silently ignored and the reel posts instantly —
@@ -808,7 +865,7 @@ def _park_proxy_empty(reader: SheetsReader, row_index: int, row: dict,
     proxy_recovery workflow rebuilds every parked row automatically once the
     proxy has traffic again, so there is zero manual sheet work."""
     log.warning("Row %d parked — proxy out of traffic: %s", row_index, detail)
-    _try_update(reader, row_index, "Status", PROXY_EMPTY_STATUS)
+    _set_status(reader, row_index, PROXY_EMPTY_STATUS)
     _try_update(
         reader, row_index, "Media Status",
         f"{_PROXY_MARKER} (DataImpulse 407) — parked, auto-rebuilds within "
