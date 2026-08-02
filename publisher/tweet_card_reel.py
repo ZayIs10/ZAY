@@ -577,7 +577,8 @@ def build_reel_for_row(row: dict) -> Path:
     return out_mp4
 
 
-def run(row_index: int | None, *, topic: str | None = None, dry_run: bool) -> int:
+def run(row_index: int | None, *, topic: str | None = None, dry_run: bool,
+        force: bool = False) -> int:
     config = _sheets_config()
     reader = SheetsReader(config)
 
@@ -595,6 +596,31 @@ def run(row_index: int | None, *, topic: str | None = None, dry_run: bool) -> in
         row = _read_row_by_index(reader, row_index)
 
     log.info("Processing row %d: %r", row_index, row.get("Topic", "(no topic)"))
+
+    # IDEMPOTENCY GUARD — never re-render a row that already has a finished reel.
+    # Status cannot be trusted for this: n8n's claim node overwrites it with
+    # "Building" BEFORE it dispatches, so by the time we read the row the
+    # "Ready to Post" that would have told us "already done" is gone. The
+    # durable evidence is the Reel MP4 URL the last successful build wrote.
+    # Why this exists (2026-08-02): the LIVE n8n gate had drifted from the
+    # committed JSON and was re-passing rows on every sheet write, so each
+    # finished build dispatched another build of the SAME topic about once a
+    # minute — duplicate renders on the PC and duplicate Drive uploads.
+    existing_mp4 = str(row.get("Reel MP4 URL", "") or "").strip()
+    if existing_mp4 and not force:
+        log.warning("Row %d already has a finished reel (%s) — refusing to "
+                    "re-render. Pass --force to rebuild deliberately.",
+                    row_index, existing_mp4)
+        # Write as LITTLE as possible: every write shows up as a row change on
+        # n8n's next poll, which is what feeds a dispatch loop. The one repair
+        # worth making is a claim left dangling by the duplicate dispatch —
+        # "Building" is meant to be transient, and a row stuck there looks
+        # in-progress forever.
+        if not dry_run and str(row.get("Status", "")).strip() == CLAIM_STATUS:
+            _try_update(reader, row_index, "Status", DONE_STATUS)
+            log.info("Repaired stale claim: Status %r -> %r.",
+                     CLAIM_STATUS, DONE_STATUS)
+        return 0
 
     # Claim the row IMMEDIATELY so a re-poll (n8n fires every minute) sees
     # "Building", not "Ready to Run", and won't kick off a duplicate render.
@@ -878,12 +904,16 @@ def main(argv: list[str]) -> int:
                    help="Render the next Status='Ready to Run' row")
     p.add_argument("--dry-run", action="store_true",
                    help="Build mp4 locally, skip Drive upload + Sheet update")
+    p.add_argument("--force", action="store_true",
+                   help="Re-render even if the row already has a Reel MP4 URL "
+                        "(the idempotency guard normally refuses this)")
     args = p.parse_args(argv)
 
     return run(
         args.row if not (args.next or args.topic) else None,
         topic=args.topic,
         dry_run=args.dry_run,
+        force=args.force,
     )
 
 
