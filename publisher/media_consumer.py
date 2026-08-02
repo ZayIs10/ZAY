@@ -135,6 +135,18 @@ def _http_download(url: str, dest: Path) -> None:
 _YT_CLIENTS_COOKIELESS = ("tv", "ios", "android", "web_safari")
 _YT_CLIENTS_WITH_COOKIES = ("web", "tv", "ios")
 
+# HARD SPEND CEILING for the whole-file fallback when downloading through the
+# METERED residential proxy. A ranged download is ~2-4 MB, but the whole-file
+# retry below has no natural size limit — a long tutorial is 68-460 MB, and the
+# retry used to be offered once PER CLIENT (up to 7), so a single unlucky build
+# could pull multiple GB. That is precisely how the $5 DataImpulse balance
+# vanished in a month (407 TRAFFIC_EXHAUSTED, 2026-08-02) and the current
+# Thordata plan is only 1 GB. yt-dlp checks this against the format's reported
+# size and refuses BEFORE spending anything, so an oversized source costs ~0
+# instead of the whole file. 60 MB comfortably covers any short/normal source
+# while making a runaway drain impossible.
+PROXIED_WHOLEFILE_MAX_BYTES = 60_000_000
+
 
 def _ytdlp_base_opts(dest: Path, section_seconds: float | None = None) -> dict:
     """Shared yt-dlp options for every client attempt.
@@ -215,6 +227,10 @@ def _ytdlp_base_opts(dest: Path, section_seconds: float | None = None) -> dict:
         # crashing the sheet write at the end of the build. The video+audio
         # merge is local-file-only (no network), so it never needs the proxy.
         opts["proxy"] = proxy
+        # Metered path + no range = the whole-file fallback. Cap it so a long
+        # source can never silently drain the balance (see the constant).
+        if not (section_seconds and section_seconds > 0):
+            opts["max_filesize"] = PROXIED_WHOLEFILE_MAX_BYTES
     ff = _resolve_ffmpeg()
     if ff and ff != "ffmpeg":
         # yt-dlp merges video+audio with ffmpeg; point it at the resolved
@@ -308,6 +324,12 @@ def _ytdlp_download(url: str, dest: Path,
 
     proxied = bool(os.environ.get("PROXY_URL", "").strip())
     last_exc: Exception | None = None
+    # The whole-file fallback is offered AT MOST ONCE PER BUILD, not once per
+    # client. It used to be per-client, so a source that trips ffmpeg's range
+    # fetch on every client could trigger up to 7 whole-video downloads in a
+    # single build (0.5-3.2 GB through a metered proxy). One attempt is enough
+    # to prove whether whole-file helps; if it doesn't, more won't.
+    wholefile_spent = False
     for client, use_cookies in attempts:
         # Per client: try the cheap RANGED download first (only the opening
         # section — what the reel actually uses). Under the metered proxy,
@@ -318,10 +340,19 @@ def _ytdlp_download(url: str, dest: Path,
         # behavior, just costlier. Without a proxy the whole-file retry is
         # pointless (nothing metered changed), so keep the old semantics.
         plans: list[float | None] = [section_seconds]
-        if proxied and section_seconds:
+        if proxied and section_seconds and not wholefile_spent:
             plans.append(None)
         for plan_seconds in plans:
             ranged_plan = plan_seconds is not None and plan_seconds > 0
+            if not ranged_plan and proxied:
+                # Consume the single per-build whole-file allowance up front, so
+                # it is spent even if this attempt throws.
+                wholefile_spent = True
+                log.warning(
+                    "Ranged download failed — spending this build's ONE "
+                    "whole-file retry (capped at %d MB) through the metered "
+                    "proxy. Later clients get ranged attempts only.",
+                    PROXIED_WHOLEFILE_MAX_BYTES // 1_000_000)
             opts = _ytdlp_base_opts(dest, section_seconds=plan_seconds)
             opts["extractor_args"] = {"youtube": {"player_client": [client]}}
             if use_cookies and cookiefile:
