@@ -207,8 +207,17 @@ that side's run.
   feature relying on a swallowed import "never seems to fire", check the
   module actually exists on the branch that RUNS.
 
-- **ffmpeg exit-251 / Skipped-No-Video:** `download_ranges` forces ffmpeg
-  which ignores the proxy — ranges are dropped when `PROXY_URL` is set
+- **ffmpeg exit-251 / Skipped-No-Video — CORRECTED 2026-08-02:** the June
+  claim "ffmpeg ignores the proxy for HTTPS, so drop `download_ranges`
+  under `PROXY_URL`" is WRONG: yt-dlp's FFmpegFD exports
+  `HTTP_PROXY`/`http_proxy` into the ffmpeg subprocess and ffmpeg honours
+  it for http AND https (CONNECT) — proven with the dead proxy's 407 as a
+  tracer on winget ffmpeg 8 (local) and apt ffmpeg 6.1.1 (CI). Dropping
+  ranges made every proxied build download the WHOLE video (68–460 MB
+  measured) and drained the $5 DataImpulse balance in ~a month. Ranges are
+  now ON under the proxy; if a ranged attempt fails for a non-bot,
+  non-proxy reason the same client retries whole-file (never worse than
+  the old behavior). See `media_consumer._ytdlp_base_opts`/`_ytdlp_download`.
 
 - **Proxy `407 TRAFFIC_EXHAUSTED` = DataImpulse account out of traffic**
   (seen 2026-08-02, burned 8 topics): the proxy rejects every CONNECT, so

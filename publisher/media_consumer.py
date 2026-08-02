@@ -177,29 +177,28 @@ def _ytdlp_base_opts(dest: Path, section_seconds: float | None = None) -> dict:
     }
     proxy = os.environ.get("PROXY_URL", "").strip()
 
-    # ---- THE exit-251 FIX (root cause PROVEN, not guessed) -----------------
-    # `download_ranges` (fetch only the first N seconds) makes yt-dlp hand the
-    # download to ffmpeg (FFmpegFD) — verified: FFmpegFD.real_download fires
-    # even on a plain progressive stream when a range is set. That ffmpeg
-    # subprocess fetches the media URL over HTTPS ITSELF and ignores yt-dlp's
-    # `proxy` opt (ffmpeg's -http_proxy doesn't cover HTTPS either). On the
-    # cloud runner it therefore hit YouTube from the bot-blocked DATACENTER IP,
-    # the connection reset, and ffmpeg died: "ffmpeg exited with code 251" —
-    # every source URL, ~60s each = the reels getting "Skipped - No Video".
+    # ---- Section download works UNDER THE PROXY TOO (re-verified 2026-08-02).
+    # History: `download_ranges` makes yt-dlp hand the fetch to ffmpeg
+    # (FFmpegFD), and the June exit-251 diagnosis assumed that ffmpeg ignored
+    # the proxy for HTTPS — so ranges were dropped whenever PROXY_URL was set
+    # and every proxied build silently pulled the WHOLE video (68-460 MB per
+    # topic once we pivoted to long tutorials). That burned the entire $5
+    # DataImpulse balance in ~a month (407 TRAFFIC_EXHAUSTED, 2026-08-02).
     #
-    # Fix: under the proxy, DON'T set download_ranges. yt-dlp then downloads the
-    # whole clip with its NATIVE downloader (verified used_ffmpeg_fetch=False),
-    # which honours `proxy`, so every byte goes through the residential IP. The
-    # sources are short talking-head clips (~5-6 MB whole, ~0.6c at ~$1/GB) and
-    # the compositor already trims to the used opening, so this costs pennies
-    # and is bulletproof. Any HD DASH pair still merges from LOCAL files (no
-    # network), so it stays proxy-safe too.
-    if proxy:
-        pass  # deliberately no download_ranges — see above
-    elif section_seconds and section_seconds > 0:
-        # No proxy (self-hosted PC / free path): the native downloader CAN honour
-        # ranges here because it isn't fighting a proxy, so keep the bandwidth
-        # saving. download_range_func lives in yt_dlp.utils; import lazily so
+    # The assumption is wrong for our ffmpeg builds: yt-dlp's FFmpegFD exports
+    # HTTP_PROXY/http_proxy into the ffmpeg subprocess env, and ffmpeg's
+    # http.c consults that env var for BOTH http and https (CONNECT tunnel).
+    # Proven with the dead proxy as a tracer — ffmpeg reported the proxy's
+    # "407" instead of connecting direct — on winget ffmpeg 8 (local) AND
+    # apt ffmpeg on ubuntu-latest (CI probe run 30729218407).
+    #
+    # So: ALWAYS request the ranged download when the caller only needs the
+    # opening (~60s ≈ 10-25 MB instead of the full video). _ytdlp_download
+    # additionally retries a failed ranged attempt whole-file under the proxy,
+    # so even if a specific stream trips ffmpeg (the old exit-251 family) the
+    # build degrades to the previous whole-file behavior instead of skipping.
+    if section_seconds and section_seconds > 0:
+        # download_range_func lives in yt_dlp.utils; import lazily so
         # this module still loads without yt-dlp.
         from yt_dlp.utils import download_range_func  # type: ignore
         opts["download_ranges"] = download_range_func(
@@ -307,50 +306,81 @@ def _ytdlp_download(url: str, dest: Path,
                  "(%s). This is expected and fine.",
                  ", ".join(_YT_CLIENTS_COOKIELESS))
 
+    proxied = bool(os.environ.get("PROXY_URL", "").strip())
     last_exc: Exception | None = None
     for client, use_cookies in attempts:
-        opts = _ytdlp_base_opts(dest, section_seconds=section_seconds)
-        opts["extractor_args"] = {"youtube": {"player_client": [client]}}
-        if use_cookies and cookiefile:
-            opts["cookiefile"] = cookiefile
-        # A stale partial download from a failed client must not poison the
-        # next attempt — yt-dlp would otherwise resume a 0-byte/partial file.
-        for leftover in dest.parent.glob(dest.name + "*"):
+        # Per client: try the cheap RANGED download first (only the opening
+        # section — what the reel actually uses). Under the metered proxy,
+        # if the ranged attempt dies for a reason that is neither bot-block
+        # nor proxy-exhaustion (e.g. a stream that trips ffmpeg's range
+        # fetch — the old exit-251 family), fall back to the WHOLE-file
+        # download for the same client: never worse than the pre-range
+        # behavior, just costlier. Without a proxy the whole-file retry is
+        # pointless (nothing metered changed), so keep the old semantics.
+        plans: list[float | None] = [section_seconds]
+        if proxied and section_seconds:
+            plans.append(None)
+        for plan_seconds in plans:
+            ranged_plan = plan_seconds is not None and plan_seconds > 0
+            opts = _ytdlp_base_opts(dest, section_seconds=plan_seconds)
+            opts["extractor_args"] = {"youtube": {"player_client": [client]}}
+            if use_cookies and cookiefile:
+                opts["cookiefile"] = cookiefile
+            # A stale partial download from a failed attempt must not poison
+            # the next one — yt-dlp would otherwise resume a 0-byte/partial
+            # file.
+            for leftover in dest.parent.glob(dest.name + "*"):
+                try:
+                    leftover.unlink()
+                except OSError:
+                    pass
             try:
-                leftover.unlink()
-            except OSError:
-                pass
-        try:
-            log.info("yt-dlp attempt: client=%s cookies=%s", client, use_cookies)
-            with YoutubeDL(opts) as ydl:
-                ydl.download([url])
-            if dest.exists() and dest.stat().st_size > 0:
-                log.info("yt-dlp SUCCESS via client=%s%s", client,
-                         " (with cookies)" if use_cookies else "")
-                return
-            # Downloaded "successfully" but produced nothing usable — treat as
-            # a soft failure and try the next client.
-            log.warning("client=%s produced no file — trying next client.",
-                        client)
-        except Exception as exc:  # noqa: BLE001 — we classify + continue
-            last_exc = exc
-            if _is_proxy_exhausted(exc):
-                # The proxy account is out of traffic — EVERY client and every
-                # backup URL goes through the same dead tunnel, so trying more
-                # is pure log spam. Surface the real problem immediately.
-                raise ProxyExhaustedError(
-                    f"Residential proxy out of traffic (407 TRAFFIC_EXHAUSTED) "
-                    f"while downloading {url}. Top up the DataImpulse account; "
-                    f"parked rows auto-rebuild via proxy_recovery."
-                ) from exc
-            if _is_bot_block(exc):
-                log.warning("client=%s bot-blocked/no-format — trying next.",
-                            client)
-                continue
-            # A non-bot error (private/removed/geo video) won't be fixed by
-            # another client. Stop now with a clear message.
-            log.error("client=%s hit a non-recoverable error: %s", client, exc)
-            raise
+                log.info("yt-dlp attempt: client=%s cookies=%s ranged=%s",
+                         client, use_cookies, ranged_plan)
+                with YoutubeDL(opts) as ydl:
+                    ydl.download([url])
+                if dest.exists() and dest.stat().st_size > 0:
+                    log.info(
+                        "yt-dlp SUCCESS via client=%s%s (%s, %.1f MB)",
+                        client, " (with cookies)" if use_cookies else "",
+                        "ranged" if ranged_plan else "whole-file",
+                        dest.stat().st_size / 1e6)
+                    return
+                # Downloaded "successfully" but produced nothing usable —
+                # treat as a soft failure and try the next client.
+                log.warning("client=%s produced no file — trying next "
+                            "client.", client)
+                break
+            except Exception as exc:  # noqa: BLE001 — we classify + continue
+                last_exc = exc
+                if _is_proxy_exhausted(exc):
+                    # The proxy account is out of traffic — EVERY client and
+                    # every backup URL goes through the same dead tunnel, so
+                    # trying more is pure log spam. Surface the real problem
+                    # immediately.
+                    raise ProxyExhaustedError(
+                        f"Residential proxy out of traffic "
+                        f"(407 TRAFFIC_EXHAUSTED) while downloading {url}. "
+                        f"Top up the DataImpulse account; parked rows "
+                        f"auto-rebuild via proxy_recovery."
+                    ) from exc
+                if _is_bot_block(exc):
+                    # A bot-gated client is gated ranged or not — move on to
+                    # the next client (staying ranged, i.e. cheap).
+                    log.warning("client=%s bot-blocked/no-format — trying "
+                                "next.", client)
+                    break
+                if ranged_plan and len(plans) > 1:
+                    log.warning(
+                        "client=%s RANGED download failed (%s) — retrying "
+                        "same client whole-file through the proxy.",
+                        client, exc)
+                    continue
+                # A non-bot error (private/removed/geo video) won't be fixed
+                # by another client. Stop now with a clear message.
+                log.error("client=%s hit a non-recoverable error: %s",
+                          client, exc)
+                raise
 
     raise RuntimeError(
         f"All YouTube clients failed to download {url}. "
