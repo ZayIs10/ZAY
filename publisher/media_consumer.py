@@ -105,7 +105,15 @@ def _http_download(url: str, dest: Path) -> None:
     # set (same reason as yt-dlp — see _ytdlp_base_opts). No-op when unset.
     proxy = os.environ.get("PROXY_URL", "").strip()
     proxies = {"http": proxy, "https": proxy} if proxy else None
-    r = requests.get(url, timeout=60, stream=True, proxies=proxies)
+    try:
+        r = requests.get(url, timeout=60, stream=True, proxies=proxies)
+    except requests.exceptions.ProxyError as exc:
+        if _is_proxy_exhausted(exc):
+            raise ProxyExhaustedError(
+                f"Residential proxy out of traffic (407 TRAFFIC_EXHAUSTED) "
+                f"while fetching {url}."
+            ) from exc
+        raise
     r.raise_for_status()
     with dest.open("wb") as f:
         for chunk in r.iter_content(chunk_size=64 * 1024):
@@ -216,6 +224,25 @@ def _ytdlp_base_opts(dest: Path, section_seconds: float | None = None) -> dict:
     return opts
 
 
+class ProxyExhaustedError(RuntimeError):
+    """The residential proxy (PROXY_URL) rejected the tunnel because the
+    account's TRAFFIC balance is used up — DataImpulse answers every CONNECT
+    with "407 TRAFFIC_EXHAUSTED". This is an INFRASTRUCTURE outage, not a
+    property of the video: no client, cookie, or backup URL can succeed until
+    the account is topped up. Callers must NOT treat it as "no usable video"
+    (which burns the topic as Skipped) — park the row and retry later
+    (see publisher/proxy_recovery.py)."""
+
+
+def _is_proxy_exhausted(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return (
+        "traffic_exhausted" in msg
+        or ("407" in msg and "tunnel connection failed" in msg)
+        or ("407" in msg and "proxyerror" in msg)
+    )
+
+
 def _is_bot_block(exc: Exception) -> bool:
     """True when an error is YouTube's anti-bot gate (vs. a genuinely dead
     video, geo-block, etc.) — those are the ones a different client can fix."""
@@ -307,6 +334,15 @@ def _ytdlp_download(url: str, dest: Path,
                         client)
         except Exception as exc:  # noqa: BLE001 — we classify + continue
             last_exc = exc
+            if _is_proxy_exhausted(exc):
+                # The proxy account is out of traffic — EVERY client and every
+                # backup URL goes through the same dead tunnel, so trying more
+                # is pure log spam. Surface the real problem immediately.
+                raise ProxyExhaustedError(
+                    f"Residential proxy out of traffic (407 TRAFFIC_EXHAUSTED) "
+                    f"while downloading {url}. Top up the DataImpulse account; "
+                    f"parked rows auto-rebuild via proxy_recovery."
+                ) from exc
             if _is_bot_block(exc):
                 log.warning("client=%s bot-blocked/no-format — trying next.",
                             client)

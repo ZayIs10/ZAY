@@ -43,7 +43,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from publisher.post_generator import SheetsReader  # noqa: E402
-from publisher.media_consumer import fetch_single_clip, fetch_image  # noqa: E402
+from publisher.media_consumer import (  # noqa: E402
+    ProxyExhaustedError, fetch_single_clip, fetch_image,
+)
 from publisher.tweet_card import render as render_card  # noqa: E402
 from publisher.compositor import build as composite_reel  # noqa: E402
 
@@ -140,6 +142,14 @@ TRIGGER_STATUS = "ready to run"
 CLAIM_STATUS = "Building"          # set immediately so a re-poll won't double-fire
 DONE_STATUS = "Ready to Post"      # terminal: reel is in Drive, do NOT re-build
 SKIPPED_STATUS = "Skipped - No Video"  # terminal: no real clip found, post skipped
+# PARKED, not terminal: the residential proxy ran out of traffic, so the clip
+# was undownloadable for INFRASTRUCTURE reasons — the topic itself is fine.
+# proxy_recovery.yml probes the proxy every 6h and rebuilds these rows
+# automatically once the DataImpulse account is topped up. Deliberately NOT
+# "Ready to Run": n8n would re-dispatch that every poll into the same dead
+# proxy, burning CI runs in a loop.
+PROXY_EMPTY_STATUS = "Proxy Empty - Retry"
+_PROXY_MARKER = "PROXY OUT OF TRAFFIC"
 
 
 class NoVideoError(RuntimeError):
@@ -451,6 +461,10 @@ def build_reel_for_row(row: dict) -> Path:
                  i, len(candidates), label, cand)
         try:
             got = fetch_single_clip(cand, slug, max_seconds=60.0)
+        except ProxyExhaustedError:
+            # Infrastructure, not this URL: every backup goes through the same
+            # empty proxy. Propagate so the row is PARKED, not skipped-burned.
+            raise
         except Exception as exc:  # noqa: BLE001 — try the next candidate
             log.warning("  %s failed: %s", label, exc)
             errors.append(f"{label}: {exc}")
@@ -618,6 +632,10 @@ def run(row_index: int | None, *, topic: str | None = None, dry_run: bool) -> in
         # "missing required fields: Reel Caption / Post Caption" error no longer
         # stops a bare row from building.
         row = _ensure_captions(reader, row_index, row, dry_run=dry_run)
+    except ProxyExhaustedError as exc:
+        if not dry_run:
+            _park_proxy_empty(reader, row_index, row, str(exc))
+        return 0
     except Exception as exc:
         log.error("Prep failed before render: %s", exc)
         log.debug(traceback.format_exc())
@@ -639,6 +657,10 @@ def run(row_index: int | None, *, topic: str | None = None, dry_run: bool) -> in
 
     try:
         mp4_path = build_reel_for_row(row)
+    except ProxyExhaustedError as exc:
+        if not dry_run:
+            _park_proxy_empty(reader, row_index, row, str(exc))
+        return 0
     except NoVideoError as exc:
         # No real footage even after trying every candidate -> SKIP (terminal,
         # not a failure/retry) AND alert the user so it's never silent.
@@ -749,6 +771,47 @@ def _send_review_email(row: dict, drive_url: str, stage=None) -> None:
         repo=_github_repo(),
     )
     send(subject, body)
+
+
+def _park_proxy_empty(reader: SheetsReader, row_index: int, row: dict,
+                      detail: str) -> None:
+    """The residential proxy is out of traffic — park the row (NOT terminal,
+    NOT the topic's fault) and tell the user exactly what to do. The
+    proxy_recovery workflow rebuilds every parked row automatically once the
+    proxy has traffic again, so there is zero manual sheet work."""
+    log.warning("Row %d parked — proxy out of traffic: %s", row_index, detail)
+    _try_update(reader, row_index, "Status", PROXY_EMPTY_STATUS)
+    _try_update(
+        reader, row_index, "Media Status",
+        f"{_PROXY_MARKER} (DataImpulse 407) — parked, auto-rebuilds within "
+        f"6h of a top-up. {detail}"[:200],
+    )
+    # One alert per row per episode: if the row already carried the marker,
+    # the user has been told — don't email again on a retry.
+    if _PROXY_MARKER in (row.get("Media Status") or ""):
+        return
+    try:
+        from publisher.notify_email import send  # late import
+        topic = (row.get("Topic") or "").strip() or f"row {row_index}"
+        subject = "[GenZ ALERT] Proxy out of traffic — reels are on hold"
+        body = (
+            f"The DataImpulse residential proxy has run out of traffic "
+            f"(407 TRAFFIC_EXHAUSTED), so YouTube downloads are impossible "
+            f"from the cloud runner right now.\n\n"
+            f"Topic parked: {topic} (row {row_index})\n\n"
+            f"WHAT TO DO (one step): top up the DataImpulse account at "
+            f"https://dataimpulse.com — that's all.\n\n"
+            f"Everything else is automatic: a recovery job probes the proxy "
+            f"every 6 hours and rebuilds ALL parked rows (Status "
+            f"'{PROXY_EMPTY_STATUS}') the moment traffic is back. You do NOT "
+            f"need to touch the sheet.\n\n"
+            f"Detail:\n{detail}\n"
+        )
+        send(subject, body)
+        log.info("Proxy-exhausted alert email sent for row %d.", row_index)
+    except Exception as exc:  # noqa: BLE001 — alerting must never crash a build
+        log.warning("Could not send proxy alert for row %d: %s",
+                    row_index, exc)
 
 
 def _alert_no_video(row: dict, row_index: int, detail: str) -> None:

@@ -46,6 +46,11 @@ Verified 2026-07-04. When an automation changes shape, update THIS file.
   end-card, LOCKED (multi-beat code in `publisher/beats.py`/`beat_media.py`
   exists but is unused)
 - **State machine:** `Ready to Run` → `Building` → `Ready to Post`
+  (terminal skips: `Skipped - No Video`, `Render Failed`; PARKED:
+  `Proxy Empty - Retry` = the residential proxy ran out of traffic —
+  `.github/workflows/proxy_recovery.yml` (cron every 6h) probes the proxy
+  and rebuilds all parked rows via `publisher/proxy_recovery.py` once the
+  DataImpulse account is topped up)
 - **Output:** rendered MP4 → Google Drive (OAuth as genzcapital999; the
   service account has no storage quota)
 
@@ -204,6 +209,17 @@ that side's run.
 
 - **ffmpeg exit-251 / Skipped-No-Video:** `download_ranges` forces ffmpeg
   which ignores the proxy — ranges are dropped when `PROXY_URL` is set
+
+- **Proxy `407 TRAFFIC_EXHAUSTED` = DataImpulse account out of traffic**
+  (seen 2026-08-02, burned 8 topics): the proxy rejects every CONNECT, so
+  ALL yt-dlp clients/backup URLs fail — it is NOT a YouTube/bot problem and
+  NOT the video's fault. `media_consumer.ProxyExhaustedError` classifies it;
+  the build PARKS the row at `Proxy Empty - Retry` (never the terminal
+  `Skipped - No Video`) + emails once per row. Only fix: user tops up at
+  dataimpulse.com; `proxy_recovery.yml` then rebuilds parked rows
+  automatically within 6h. Probe by hand:
+  `curl -x "$PROXY_URL" https://www.google.com/generate_204` → look for
+  `407 TRAFFIC_EXHAUSTED` in the CONNECT response.
 - **NEVER set `http_proxy`/`https_proxy` in `os.environ`** — breaks Google
   Sheets auth; scope any proxy to the specific downloader
 - **Pexels clips crash HyperFrames** unless re-encoded with

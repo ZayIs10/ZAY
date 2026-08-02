@@ -1,0 +1,104 @@
+name: Proxy Recovery (rebuild parked reels)
+
+# When the DataImpulse residential proxy runs out of traffic, builds park
+# their rows at Status="Proxy Empty - Retry" instead of burning the topic
+# (see publisher/tweet_card_reel.py). This job probes the proxy every 6h
+# with a ~1KB request; the moment the account is topped up it rebuilds all
+# parked rows automatically — the user's only job is the top-up itself.
+#
+# While the proxy is still empty each run costs ~1 minute (probe + exit).
+# Renders happen inline here (no repository_dispatch: the default
+# GITHUB_TOKEN can't trigger other workflows), so this job needs the same
+# toolchain as build_tweet_card_reel.yml.
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch: {}
+
+# Never two recovery passes at once (double-render risk). A queued tick that
+# gets superseded is harmless — every run re-scans the sheet from scratch.
+concurrency:
+  group: proxy-recovery
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    env:
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      GOOGLE_SHEET_REELS_NAME: Reels
+      YOUTUBE_COOKIES_FILE: youtube_cookies.txt
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      PROXY_URL: ${{ secrets.PROXY_URL }}
+      INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
+      INSTAGRAM_IG_USER_ID: ${{ secrets.INSTAGRAM_IG_USER_ID }}
+      GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+      NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install ffmpeg + Deno
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          curl -fsSL https://deno.land/install.sh | sh
+          echo "$HOME/.deno/bin" >> "$GITHUB_PATH"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install yt-dlp
+
+      - name: Write .env
+        run: |
+          {
+            printf "GOOGLE_SHEET_ID=%s\n" "$GOOGLE_SHEET_ID"
+            printf "GOOGLE_SHEET_REELS_NAME=%s\n" "$GOOGLE_SHEET_REELS_NAME"
+            printf "YOUTUBE_API_KEY=%s\n" "$YOUTUBE_API_KEY"
+            [ -n "$PROXY_URL" ] && printf "PROXY_URL=%s\n" "$PROXY_URL"
+            true
+          } > .env
+
+      - name: Write Google service account
+        run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > google_service_account.json
+
+      - name: Write Drive OAuth token
+        run: |
+          if [ -n '${{ secrets.GOOGLE_DRIVE_TOKEN_JSON }}' ]; then
+            echo '${{ secrets.GOOGLE_DRIVE_TOKEN_JSON }}' > google_drive_token.json
+          fi
+
+      - name: Write YouTube cookies (optional bonus)
+        env:
+          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
+        run: |
+          if [ -n "$YOUTUBE_COOKIES" ]; then
+            printf '%s' "$YOUTUBE_COOKIES" > youtube_cookies.txt
+          fi
+
+      - name: Probe proxy + rebuild parked reels
+        run: |
+          set -o pipefail
+          mkdir -p logs renders
+          python publisher/proxy_recovery.py 2>&1 | tee logs/proxy_recovery.log
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: proxy-recovery-logs-${{ github.run_id }}
+          path: logs/
+          retention-days: 7
