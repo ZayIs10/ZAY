@@ -243,6 +243,25 @@ that side's run.
   release the parked rows. If a proxy is ever wanted again, cheaper low-minimum
   options exist (Proxyon ~$1.75/GB, $5 min, 100 MB free trial; Proxidize
   ~$1/GB, no minimum) — it is a one-secret swap, no code change.
+- **The LIVE n8n gate can differ from the committed JSON — and did (2026-08-02).**
+  `tweet_card_reel_workflow.json` correctly tests
+  `$json['Status'] == "ready to run"`, but the live Workflow B passed a row whose
+  `Status` was `"Building"`. Root cause: the Reels tab has TWO status-ish
+  columns — the live `Status` (index 42, far right, off-screen) and a LEGACY
+  `Published` (index 5 = column F) from the old Instagram-post pipeline. Five
+  rows (61, 66-69) had the trigger words `"Ready to Run"` typed into `Published`
+  instead of `Status`, and the live gate latched onto that. Since it never
+  changes, EVERY write to those rows re-opened the gate: build → write → poll →
+  build, ~once a minute, duplicate renders + duplicate Drive uploads + one
+  "render success" email per minute. Row 61 built 3x in 6 minutes.
+  Nothing in `publisher/` reads or writes a `Published` column for reels (the
+  hits are the string `"Published"` written into `Status`/`Instagram Post`), so
+  the stray values were cleared. **Two lessons:** (1) when a gate misfires,
+  compare the LIVE graph to the repo JSON — re-importing is a manual step that
+  gets skipped; (2) never trust `Status` to mean "already done" in the build,
+  because n8n's claim node overwrites it with `"Building"` BEFORE dispatching —
+  `tweet_card_reel.run()` guards on the durable `Reel MP4 URL` instead and
+  refuses to re-render without `--force`.
 - **NEVER set `http_proxy`/`https_proxy` in `os.environ`** — breaks Google
   Sheets auth; scope any proxy to the specific downloader
 - **Pexels clips crash HyperFrames** unless re-encoded with
