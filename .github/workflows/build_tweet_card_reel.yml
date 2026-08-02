@@ -2,37 +2,57 @@ name: Build Tweet-Card Reel
 
 # Fired by Workflow B (n8n) after it has written Media Video URL +
 # Media Image URL to a Reels-tab row that the user flipped to
-# Status="Ready".
+# Status="Ready to Run".
 #
 # n8n call shape:
 #   POST https://api.github.com/repos/<owner>/<repo>/dispatches
 #   {
 #     "event_type": "build-tweet-card-reel",
-#     "client_payload": { "row_index": "17" }
+#     "client_payload": { "topic": "Exact Topic string" }
 #   }
 #
-# Also runnable manually from the GitHub Actions UI (specify row_index).
+# Also runnable manually from the GitHub Actions UI (specify topic or row_index).
 #
-# RUNS ON A SELF-HOSTED RUNNER (the user's own PC), NOT GitHub's servers.
-# Why: YouTube permanently bot-blocks datacenter IPs (GitHub Actions) with
-# "Sign in to confirm you're not a bot" — no login fixes it, it's the IP.
-# Running the download from the user's home internet is the only reliable,
-# free, automatic fix. If the PC is OFF the job QUEUES and runs the moment the
-# PC comes online; only if no runner appears within 24h does GitHub fail it.
-# The runner auto-starts at logon (scheduled task "GitHubActionsRunner-GenZ").
+# ===========================================================================
+# WHERE THIS RENDERS IS DECIDED AT RUNTIME (rebuilt 2026-08-02)
+# ===========================================================================
+# YouTube permanently bot-blocks datacenter IPs (GitHub Actions) with "Sign in
+# to confirm you're not a bot" — no login fixes it, it is the IP. So a cloud
+# build can only download through a RESIDENTIAL proxy, and a proxy needs a live
+# paid balance. Historically we flipped this file by hand between two modes and
+# each flip was a fresh outage: leave PROXY_URL set with an empty balance and
+# every download 407s; forget to remove it and the same thing happens on the PC.
 #
-# RESTORED 2026-08-02 (this replaced the ubuntu-latest + DataImpulse proxy
-# setup of 2026-06-30). The proxy ran out of traffic and DataImpulse's
-# dashboard now demands a $50 minimum top-up instead of the $5 it advertises,
-# so the paid cloud path is on hold and reels are back on the free home IP.
-# Deliberately NO PROXY_URL in env here: the secret still exists but its
-# balance is empty, and passing it would make every download 407 instead of
-# going out direct. To return to cloud+proxy: set runs-on back to
-# ubuntu-latest, restore the bash steps (git show b603322), and re-add
-# PROXY_URL to env + the .env writer.
+# Now there are three jobs and the flip is automatic:
 #
-# Tools are pre-installed on the PC (Python 3.13, ffmpeg via winget, Deno,
-# yt-dlp, node). The steps below VERIFY them rather than install them.
+#   probe  — ubuntu-latest, ~20s. Tests whether PROXY_URL can actually pass
+#            traffic right now. Outputs cloud=true|false.
+#   cloud  — ubuntu-latest, runs only when the probe says the proxy is ALIVE.
+#            The user's PC can be off. Downloads route through the proxy.
+#   pc     — [self-hosted, windows, genz-pc] (the user's PC, "marc-pc"), runs
+#            when the proxy is dead/unset, OR as a fallback if the cloud job
+#            failed. Uses the home IP, which YouTube trusts, and costs nothing.
+#            If the PC is off the job QUEUES and runs when it comes online.
+#
+# Net effect: buying proxy traffic switches reels to the cloud with no code
+# change, and the traffic running out silently falls back to the PC instead of
+# parking rows. Never add a workflow-level `concurrency:` block here — GitHub
+# cancels queued runs and topics get silently dropped.
+#
+# PROXY provider notes (see memory reel_render_cloud_only):
+#   - The pipeline downloads only the used section of each clip (~3 MB/reel),
+#     so it consumes ~0.3 GB/month at one reel/day.
+#   - At that volume the ONLY metric that matters is whether traffic EXPIRES.
+#     Thordata (current secret) expires ~30 days after purchase, so the balance
+#     must be renewed to keep the cloud path alive — when it lapses this
+#     workflow just uses the PC again rather than failing.
+#   - DEBUGGING A DEAD PROXY: probe over plain http://, never https://.
+#     Providers return their real error as a response body over HTTP
+#     ("Your proxy package has expired..."); over HTTPS the identical request
+#     dies at the TLS handshake with no message (curl exit 35, http_code 000).
+#
+# Tools on the PC are pre-installed (Python 3.13, ffmpeg via winget, Deno,
+# yt-dlp, node) — the pc job VERIFIES them rather than installing them.
 
 on:
   repository_dispatch:
@@ -49,7 +69,219 @@ on:
         type: string
 
 jobs:
-  build:
+  # ==========================================================================
+  # 1. PROBE — can the residential proxy pass traffic right now?
+  # ==========================================================================
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      cloud: ${{ steps.check.outputs.cloud }}
+    steps:
+      - name: Probe the residential proxy
+        id: check
+        env:
+          PROXY_URL: ${{ secrets.PROXY_URL }}
+        run: |
+          cloud=false
+          reason=""
+
+          if [ -z "${PROXY_URL:-}" ]; then
+            reason="PROXY_URL secret is not set"
+          else
+            # STEP 1 — plain HTTP. Providers return their real refusal as a
+            # BODY here. The same request over HTTPS dies at the TLS handshake
+            # with no message at all, so http:// is the only readable probe.
+            resp=$(curl -s --max-time 30 -w '\n%{http_code}' -x "$PROXY_URL" "http://ipinfo.io/json" 2>/dev/null || true)
+            code=$(printf '%s' "$resp" | tail -n1)
+            body=$(printf '%s' "$resp" | sed '$d')
+
+            if [ "$code" != "200" ]; then
+              reason="plain-HTTP probe returned HTTP ${code:-none}"
+            elif printf '%s' "$body" | grep -qiE 'errorMsg|expired|no service permission|exhausted|insufficient|renewal'; then
+              # e.g. Thordata "Your proxy package has expired, and you currently
+              # have no service permissions", DataImpulse "TRAFFIC_EXHAUSTED".
+              reason="provider refused traffic: $(printf '%s' "$body" | tr -d '\n' | head -c 180)"
+            else
+              # STEP 2 — HTTPS must work too. yt-dlp only ever talks HTTPS to
+              # YouTube, and a proxy can pass http:// while failing CONNECT+TLS.
+              tls=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -x "$PROXY_URL" "https://www.google.com/generate_204" 2>/dev/null || true)
+              if [ "$tls" = "204" ]; then
+                cloud=true
+                reason="proxy alive, exit $(printf '%s' "$body" | tr -d '\n ' | grep -oE '"ip":"[0-9.]+"' | head -1)"
+              else
+                reason="HTTPS through the proxy failed (http_code=${tls:-none})"
+              fi
+            fi
+          fi
+
+          echo "cloud=$cloud" >> "$GITHUB_OUTPUT"
+          if [ "$cloud" = "true" ]; then
+            echo "::notice::Rendering in GitHub's CLOUD (your PC can stay off) — $reason"
+          else
+            echo "::notice::Rendering on the SELF-HOSTED PC (free, home IP) — $reason"
+          fi
+
+  # ==========================================================================
+  # 2. CLOUD BUILD — proxy is alive, the user's PC is not needed.
+  # ==========================================================================
+  cloud:
+    needs: probe
+    if: needs.probe.outputs.cloud == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      GOOGLE_SHEET_REELS_NAME: Reels
+      YOUTUBE_COOKIES_FILE: youtube_cookies.txt
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      # Residential proxy — the load-bearing secret that lets the cloud download
+      # YouTube clips at all. See media_consumer._ytdlp_base_opts / _http_download.
+      PROXY_URL: ${{ secrets.PROXY_URL }}
+      # Instagram staging (upload + process the reel; the user taps Publish).
+      # If unset the build still succeeds — it skips IG staging and the review
+      # email tells the user to post from the Drive link instead.
+      INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
+      INSTAGRAM_IG_USER_ID: ${{ secrets.INSTAGRAM_IG_USER_ID }}
+      # Review-email notifier (Gmail SMTP, app password). If these secrets are
+      # unset the build still succeeds — it just skips the email.
+      GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+      NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        # setup-python is fine on Linux — the hang that bit us was Windows-only.
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install ffmpeg + Deno
+        # ffmpeg: the full apt build supports -crf (stripped builds reject it).
+        # Deno: yt-dlp's JS runtime for the YouTube "n challenge" solver.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          curl -fsSL https://deno.land/install.sh | sh
+          echo "$HOME/.deno/bin" >> "$GITHUB_PATH"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install yt-dlp
+
+      - name: Verify tools
+        run: |
+          python --version
+          ffmpeg -version | head -1
+          deno --version | head -1 || echo "::warning::deno not found (yt-dlp JS solver may degrade)"
+
+      - name: Write .env
+        run: |
+          {
+            printf "GOOGLE_SHEET_ID=%s\n" "$GOOGLE_SHEET_ID"
+            printf "GOOGLE_SHEET_REELS_NAME=%s\n" "$GOOGLE_SHEET_REELS_NAME"
+            printf "YOUTUBE_API_KEY=%s\n" "$YOUTUBE_API_KEY"
+            printf "PROXY_URL=%s\n" "$PROXY_URL"
+          } > .env
+
+      - name: Write Google service account
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: printf '%s' "$GOOGLE_SERVICE_ACCOUNT_JSON" > google_service_account.json
+
+      - name: Write Drive OAuth token
+        # Pre-authorized token JSON (run publish_reel.py locally once to mint it,
+        # then copy the contents of google_drive_token.json into this secret).
+        env:
+          GOOGLE_DRIVE_TOKEN_JSON: ${{ secrets.GOOGLE_DRIVE_TOKEN_JSON }}
+        run: |
+          if [ -n "$GOOGLE_DRIVE_TOKEN_JSON" ]; then
+            printf '%s' "$GOOGLE_DRIVE_TOKEN_JSON" > google_drive_token.json
+          fi
+
+      - name: Write YouTube cookies (OPTIONAL — proxy + cookieless is the default)
+        # Downloads use cookieless YouTube player clients through the residential
+        # proxy, so login cookies are NOT required. If the secret IS present we
+        # still write it as a bonus for rare age-gated clips; empty is normal.
+        env:
+          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
+        run: |
+          if [ -z "$YOUTUBE_COOKIES" ]; then
+            echo "::notice::No YOUTUBE_COOKIES secret — using cookieless clients through the proxy (the normal path)."
+          else
+            printf '%s' "$YOUTUBE_COOKIES" > youtube_cookies.txt
+            echo "Wrote youtube_cookies.txt ($(wc -l < youtube_cookies.txt) lines) — used as a bonus backup."
+          fi
+
+      - name: Resolve target (topic preferred, row_index fallback)
+        id: target
+        env:
+          # Topic is the robust selector: it can't drift if the sheet is
+          # re-sorted between n8n firing and this build running. row_index
+          # is kept only as a fallback for old callers / manual runs.
+          TOPIC: ${{ github.event.client_payload.topic || github.event.inputs.topic }}
+          ROW_INDEX: ${{ github.event.client_payload.row_index || github.event.inputs.row_index }}
+        run: |
+          if [ -n "$TOPIC" ]; then
+            echo "mode=topic" >> "$GITHUB_OUTPUT"
+            echo "topic=$TOPIC" >> "$GITHUB_OUTPUT"
+            echo "Building reel for Topic: $TOPIC"
+          elif [ -n "$ROW_INDEX" ]; then
+            echo "mode=row" >> "$GITHUB_OUTPUT"
+            echo "row=$ROW_INDEX" >> "$GITHUB_OUTPUT"
+            echo "Building reel for Reels row $ROW_INDEX (no topic given)"
+          else
+            echo "::error::Neither topic nor row_index provided"
+            exit 1
+          fi
+
+      - name: Build reel
+        env:
+          TOPIC: ${{ steps.target.outputs.topic }}
+          ROW: ${{ steps.target.outputs.row }}
+          MODE: ${{ steps.target.outputs.mode }}
+        run: |
+          set -o pipefail
+          mkdir -p logs renders
+          if [ "$MODE" = "topic" ]; then
+            python publisher/tweet_card_reel.py --topic "$TOPIC" 2>&1 | tee "logs/tweet_card_reel.log"
+          else
+            python publisher/tweet_card_reel.py --row "$ROW" 2>&1 | tee "logs/tweet_card_reel_row${ROW}.log"
+          fi
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tweet-card-reel-logs-cloud-${{ github.run_id }}
+          path: logs/
+          retention-days: 7
+
+      - name: Upload reel mp4 (debug)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tweet-card-reel-mp4-cloud-${{ github.run_id }}
+          path: renders/*-tweet.mp4
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ==========================================================================
+  # 3. PC BUILD — free fallback on the user's own machine (home IP).
+  #    Runs when the proxy is dead/unset, or if the cloud build failed.
+  # ==========================================================================
+  pc:
+    needs: [probe, cloud]
+    # always() is required or this job is skipped whenever `cloud` is skipped.
+    # A failed/blank probe also lands here, which is the safe default.
+    if: always() && (needs.probe.outputs.cloud != 'true' || needs.cloud.result == 'failure')
     # Self-hosted runner on the user's PC. All three labels must match the
     # runner registered as "marc-pc" (self-hosted, windows, genz-pc).
     runs-on: [self-hosted, windows, genz-pc]
@@ -65,13 +297,11 @@ jobs:
       GOOGLE_SHEET_REELS_NAME: Reels
       YOUTUBE_COOKIES_FILE: youtube_cookies.txt
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-      # Instagram staging (upload + process the reel; the user taps Publish).
-      # If unset the build still succeeds — it skips IG staging and the review
-      # email tells the user to post from the Drive link instead.
+      # DELIBERATELY NO PROXY_URL HERE. This job exists because the proxy is
+      # dead or the cloud attempt failed; passing a dead proxy would make every
+      # download 407 instead of going out direct over the trusted home IP.
       INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
       INSTAGRAM_IG_USER_ID: ${{ secrets.INSTAGRAM_IG_USER_ID }}
-      # Review-email notifier (Gmail SMTP, app password). If these secrets are
-      # unset the build still succeeds — it just skips the email.
       GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
       GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
       NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
@@ -133,7 +363,8 @@ jobs:
       - name: Write .env
         # OVERWRITE (not append): a self-hosted runner reuses the same working
         # directory across runs, and .env is gitignored so checkout won't wipe
-        # it. Starting fresh each run avoids stale/duplicate keys piling up.
+        # it. Starting fresh each run avoids stale/duplicate keys piling up —
+        # and critically, drops any PROXY_URL a previous cloud-mode run left.
         run: |
           $lines = @(
             "GOOGLE_SHEET_ID=$env:GOOGLE_SHEET_ID"
@@ -225,7 +456,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tweet-card-reel-logs-${{ github.run_id }}
+          name: tweet-card-reel-logs-pc-${{ github.run_id }}
           path: logs/
           retention-days: 7
 
@@ -233,7 +464,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tweet-card-reel-mp4-${{ github.run_id }}
+          name: tweet-card-reel-mp4-pc-${{ github.run_id }}
           path: renders/*-tweet.mp4
           retention-days: 7
           if-no-files-found: ignore
