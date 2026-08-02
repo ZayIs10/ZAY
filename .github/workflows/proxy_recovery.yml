@@ -1,38 +1,51 @@
-name: Proxy Recovery (rebuild parked reels)
+name: Rebuild Parked Reels
 
-# When the DataImpulse residential proxy runs out of traffic, builds park
-# their rows at Status="Proxy Empty - Retry" instead of burning the topic
-# (see publisher/tweet_card_reel.py). This job probes the proxy every 6h
-# with a ~1KB request; the moment the account is topped up it rebuilds all
-# parked rows automatically — the user's only job is the top-up itself.
+# Sweeper for reels that got parked at Status="Proxy Empty - Retry" instead of
+# having their topic burned as "Skipped - No Video" (see tweet_card_reel.py).
+# Parking happens when a download path is temporarily unusable — originally
+# only "the DataImpulse residential proxy ran out of traffic".
 #
-# While the proxy is still empty each run costs ~1 minute (probe + exit).
-# Renders happen inline here (no repository_dispatch: the default
-# GITHUB_TOKEN can't trigger other workflows), so this job needs the same
-# toolchain as build_tweet_card_reel.yml.
+# Two modes, decided by publisher/proxy_recovery.py at runtime:
+#   * PROXY_URL set (cloud runner)  -> probe the proxy first; still dead means
+#     exit quietly and leave the rows parked for the next sweep.
+#   * PROXY_URL unset (this runner) -> downloads go out over the home IP, so
+#     there is nothing to wait for and parked rows rebuild immediately.
+#
+# Runs on the SAME self-hosted PC runner as build_tweet_card_reel.yml, because
+# the renders happen inline here (repository_dispatch is not an option: the
+# default GITHUB_TOKEN cannot trigger other workflows) and because the home IP
+# is what gets us past YouTube's datacenter bot-block. Deliberately NO
+# PROXY_URL in env — see the build workflow header for the 2026-08-02 reasons.
+#
+# Daily rather than 6-hourly: with no proxy balance to poll, this is only a net
+# for leftovers, and a self-hosted job that finds no online runner for 24h
+# fails red — fewer ticks means less noise while the PC is off.
 
 on:
   schedule:
-    - cron: "17 */6 * * *"
+    - cron: "20 3 * * *"   # 11:20 SGT — daytime, PC usually on
   workflow_dispatch: {}
 
-# Never two recovery passes at once (double-render risk). A queued tick that
-# gets superseded is harmless — every run re-scans the sheet from scratch.
+# Never two sweeps at once (double-render risk). A queued tick that gets
+# superseded is harmless — every run re-scans the sheet from scratch.
 concurrency:
   group: proxy-recovery
   cancel-in-progress: false
 
 jobs:
   recover:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, windows, genz-pc]
     timeout-minutes: 120
+
+    defaults:
+      run:
+        shell: pwsh
 
     env:
       GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
       GOOGLE_SHEET_REELS_NAME: Reels
       YOUTUBE_COOKIES_FILE: youtube_cookies.txt
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-      PROXY_URL: ${{ secrets.PROXY_URL }}
       INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
       INSTAGRAM_IG_USER_ID: ${{ secrets.INSTAGRAM_IG_USER_ID }}
       GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
@@ -43,57 +56,93 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: Install ffmpeg + Deno
+      # No actions/setup-python here — it hangs on a self-hosted Windows runner
+      # trying to provision a tool-cache Python. The PC's own Python is used.
+      - name: Verify build tools + put winget ffmpeg on PATH
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
-          curl -fsSL https://deno.land/install.sh | sh
-          echo "$HOME/.deno/bin" >> "$GITHUB_PATH"
+          python --version
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+            $ff = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Recurse -Filter ffmpeg.exe -ErrorAction SilentlyContinue |
+                  Where-Object { $_.FullName -match 'Gyan\.FFmpeg' } | Select-Object -First 1
+            if ($ff) {
+              $bin = Split-Path $ff.FullName
+              Add-Content -Path $env:GITHUB_PATH -Value $bin
+              Write-Host "Added winget ffmpeg to PATH: $bin"
+            } else {
+              Write-Host "::warning::winget ffmpeg not found; the code's resolver will still locate it via its known install path."
+            }
+          } else {
+            Write-Host "ffmpeg already on PATH: $((Get-Command ffmpeg).Source)"
+          }
+          foreach ($tool in 'deno','node') {
+            $c = Get-Command $tool -ErrorAction SilentlyContinue
+            if ($c) { Write-Host "OK  $tool -> $($c.Source)" } else { Write-Host "::warning::$tool not on PATH (yt-dlp can still run; JS solver may degrade)" }
+          }
 
-      - name: Install Python dependencies
+      - name: Install Python dependencies (persistent venv)
+        # Same venv the build workflow uses — outside the repo so checkout-clean
+        # keeps it, and already warm from previous reel builds.
+        id: venv
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install yt-dlp
+          $venv = "C:\actions-runner\genz-venv"
+          if (-not (Test-Path "$venv\Scripts\python.exe")) {
+            Write-Host "Creating venv at $venv ..."
+            python -m venv $venv
+          }
+          $py = "$venv\Scripts\python.exe"
+          & $py -m pip install --upgrade pip
+          & $py -m pip install -r requirements.txt
+          & $py -m pip install yt-dlp
+          "python=$py" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Using venv python: $py"
 
       - name: Write .env
+        # OVERWRITE, not append: the self-hosted runner reuses its working
+        # directory and .env is gitignored, so stale keys would otherwise pile
+        # up. Note PROXY_URL is intentionally absent (direct-download mode).
         run: |
-          {
-            printf "GOOGLE_SHEET_ID=%s\n" "$GOOGLE_SHEET_ID"
-            printf "GOOGLE_SHEET_REELS_NAME=%s\n" "$GOOGLE_SHEET_REELS_NAME"
-            printf "YOUTUBE_API_KEY=%s\n" "$YOUTUBE_API_KEY"
-            [ -n "$PROXY_URL" ] && printf "PROXY_URL=%s\n" "$PROXY_URL"
-            true
-          } > .env
+          $lines = @(
+            "GOOGLE_SHEET_ID=$env:GOOGLE_SHEET_ID"
+            "GOOGLE_SHEET_REELS_NAME=$env:GOOGLE_SHEET_REELS_NAME"
+            "YOUTUBE_API_KEY=$env:YOUTUBE_API_KEY"
+          )
+          Set-Content -Path .env -Value $lines -Encoding utf8
 
       - name: Write Google service account
-        run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > google_service_account.json
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          [System.IO.File]::WriteAllText("$PWD/google_service_account.json", $env:GOOGLE_SERVICE_ACCOUNT_JSON)
 
       - name: Write Drive OAuth token
+        env:
+          GOOGLE_DRIVE_TOKEN_JSON: ${{ secrets.GOOGLE_DRIVE_TOKEN_JSON }}
         run: |
-          if [ -n '${{ secrets.GOOGLE_DRIVE_TOKEN_JSON }}' ]; then
-            echo '${{ secrets.GOOGLE_DRIVE_TOKEN_JSON }}' > google_drive_token.json
-          fi
+          if (-not [string]::IsNullOrWhiteSpace($env:GOOGLE_DRIVE_TOKEN_JSON)) {
+            [System.IO.File]::WriteAllText("$PWD/google_drive_token.json", $env:GOOGLE_DRIVE_TOKEN_JSON)
+          }
 
-      - name: Write YouTube cookies (optional bonus)
+      - name: Write YouTube cookies (OPTIONAL — cookieless is the default)
         env:
           YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
         run: |
-          if [ -n "$YOUTUBE_COOKIES" ]; then
-            printf '%s' "$YOUTUBE_COOKIES" > youtube_cookies.txt
-          fi
+          if ([string]::IsNullOrWhiteSpace($env:YOUTUBE_COOKIES)) {
+            Write-Host "::notice::No YOUTUBE_COOKIES secret — using cookieless clients from the home IP (the normal, reliable path)."
+          } else {
+            $env:YOUTUBE_COOKIES | Out-File -FilePath youtube_cookies.txt -Encoding ascii
+          }
 
-      - name: Probe proxy + rebuild parked reels
+      - name: Rebuild parked reels
+        env:
+          PY: ${{ steps.venv.outputs.python }}
         run: |
-          set -o pipefail
-          mkdir -p logs renders
-          python publisher/proxy_recovery.py 2>&1 | tee logs/proxy_recovery.log
+          New-Item -ItemType Directory -Force -Path logs, renders | Out-Null
+          $ErrorActionPreference = 'Continue'
+          & $env:PY publisher/proxy_recovery.py 2>&1 | Tee-Object -FilePath "logs/proxy_recovery.log"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::proxy_recovery.py exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
 
       - name: Upload logs
         if: always()

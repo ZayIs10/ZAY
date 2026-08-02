@@ -1,14 +1,18 @@
 """Rebuild reels that were parked because the residential proxy ran out
 of traffic (Status = "Proxy Empty - Retry").
 
-Run by .github/workflows/proxy_recovery.yml every 6 hours (and manually
-via workflow_dispatch). Flow:
+Run by .github/workflows/proxy_recovery.yml daily (and manually via
+workflow_dispatch). Flow:
 
-  1. Probe the proxy with a ~1KB request. Dead (407 TRAFFIC_EXHAUSTED /
-     tunnel failure) -> exit 0 quietly; nothing can build anyway.
-  2. Alive -> find every Reels row parked at "Proxy Empty - Retry" and
-     run the normal build for each (sequentially, so a fan-out can't
-     blow the Sheets 60-reads/min quota).
+  1. Decide whether downloads can work at all right now:
+       - PROXY_URL set (cloud runner) -> probe it with a ~1KB request.
+         Dead (407 TRAFFIC_EXHAUSTED / tunnel failure) -> exit 0 quietly;
+         nothing can build anyway, so the rows stay parked.
+       - PROXY_URL unset (self-hosted runner on the home IP) -> downloads
+         go out direct, so there is nothing to wait for: proceed.
+  2. Find every Reels row parked at "Proxy Empty - Retry" and run the
+     normal build for each (sequentially, so a fan-out can't blow the
+     Sheets 60-reads/min quota).
 
 Each build claims/finishes its own row exactly like an n8n-dispatched
 run ("Building" -> "Ready to Post" / "Skipped - No Video" / re-parked),
@@ -90,17 +94,19 @@ def _parked_topics(reader: SheetsReader) -> list[tuple[int, str]]:
 def main() -> int:
     load_dotenv(REPO_ROOT / ".env")
     proxy_url = os.getenv("PROXY_URL", "").strip()
-    if not proxy_url:
-        log.info("PROXY_URL not set — nothing to recover (direct-download "
-                 "mode, e.g. self-hosted runner). Exiting.")
-        return 0
-
-    ok, detail = probe_proxy(proxy_url)
-    if not ok:
-        log.info("Proxy still unusable (%s) — parked rows stay parked; "
-                 "next probe in ~6h. Top up DataImpulse to unblock.", detail)
-        return 0
-    log.info("Proxy is ALIVE (%s) — checking for parked rows...", detail)
+    if proxy_url:
+        ok, detail = probe_proxy(proxy_url)
+        if not ok:
+            log.info("Proxy still unusable (%s) — parked rows stay parked; "
+                     "the next sweep re-probes. Top up to unblock.", detail)
+            return 0
+        log.info("Proxy is ALIVE (%s) — checking for parked rows...", detail)
+    else:
+        # Direct-download mode: the self-hosted runner downloads from the
+        # user's home IP, which YouTube trusts, so there is no proxy balance
+        # to wait on and a parked row is buildable right now.
+        log.info("PROXY_URL not set — direct-download mode (home IP), no "
+                 "probe needed. Checking for parked rows...")
 
     reader = SheetsReader(_sheets_config())
     parked = _parked_topics(reader)

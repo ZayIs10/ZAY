@@ -16,9 +16,15 @@ Verified 2026-07-04. When an automation changes shape, update THIS file.
 ## Tweet-card reels (build)
 
 - **Trigger:** n8n `repository_dispatch` when a `reels`-tab row hits `Ready to Run`
-- **Runner:** `.github/workflows/build_tweet_card_reel.yml` on `ubuntu-latest`
-  through a residential proxy (YouTube blocks datacenter IPs; self-hosted
-  Windows runner `[self-hosted, windows, genz-pc]` is the documented fallback)
+- **Runner:** `.github/workflows/build_tweet_card_reel.yml` on the self-hosted
+  Windows runner `[self-hosted, windows, genz-pc]` = the user's own PC, home IP,
+  FREE, pwsh steps (restored 2026-08-02; the DataImpulse proxy ran dry and its
+  dashboard now demands a $50 minimum top-up vs the $5 advertised, so the
+  `ubuntu-latest` + `PROXY_URL` path of 2026-06-30 is parked, not deleted —
+  `git show b603322` has the bash steps). PROXY_URL is deliberately NOT passed
+  on the self-hosted path: the secret still exists with an empty balance, and
+  passing it would 407 every download instead of going out direct. PC off ⇒ the
+  job queues and runs when it comes online; only 24h with no runner fails it.
 - **Entry:** `python publisher/tweet_card_reel.py --topic "$TOPIC"` — selects
   the row by **Topic string**, never row number
 - **Logic:** `publisher/tweet_card.py` (card render) ·
@@ -47,10 +53,12 @@ Verified 2026-07-04. When an automation changes shape, update THIS file.
   exists but is unused)
 - **State machine:** `Ready to Run` → `Building` → `Ready to Post`
   (terminal skips: `Skipped - No Video`, `Render Failed`; PARKED:
-  `Proxy Empty - Retry` = the residential proxy ran out of traffic —
-  `.github/workflows/proxy_recovery.yml` (cron every 6h) probes the proxy
-  and rebuilds all parked rows via `publisher/proxy_recovery.py` once the
-  DataImpulse account is topped up)
+  `Proxy Empty - Retry` = a download path was temporarily unusable, originally
+  "the residential proxy ran out of traffic" — `publisher/proxy_recovery.py`
+  via `.github/workflows/proxy_recovery.yml` (daily cron, self-hosted) rebuilds
+  parked rows: with `PROXY_URL` set it probes the proxy first and stays parked
+  while it is dead; with `PROXY_URL` unset — the current free home-IP path —
+  there is nothing to wait for, so it rebuilds immediately, max 6/run)
 - **Output:** rendered MP4 → Google Drive (OAuth as genzcapital999; the
   service account has no storage quota)
 
@@ -224,11 +232,17 @@ that side's run.
   ALL yt-dlp clients/backup URLs fail — it is NOT a YouTube/bot problem and
   NOT the video's fault. `media_consumer.ProxyExhaustedError` classifies it;
   the build PARKS the row at `Proxy Empty - Retry` (never the terminal
-  `Skipped - No Video`) + emails once per row. Only fix: user tops up at
-  dataimpulse.com; `proxy_recovery.yml` then rebuilds parked rows
-  automatically within 6h. Probe by hand:
+  `Skipped - No Video`) + emails once per row. Probe by hand:
   `curl -x "$PROXY_URL" https://www.google.com/generate_204` → look for
   `407 TRAFFIC_EXHAUSTED` in the CONNECT response.
+  **Resolved 2026-08-02 by leaving the proxy, not by topping up:** DataImpulse's
+  dashboard refuses anything under **$50** ("Minimal payment is $50") even
+  though their public pricing still advertises a $5 / 5 GB minimum — the $5 the
+  user paid in June cannot be repeated. So the build moved back to the free
+  self-hosted PC runner and `proxy_recovery.py` gained a no-proxy mode to
+  release the parked rows. If a proxy is ever wanted again, cheaper low-minimum
+  options exist (Proxyon ~$1.75/GB, $5 min, 100 MB free trial; Proxidize
+  ~$1/GB, no minimum) — it is a one-secret swap, no code change.
 - **NEVER set `http_proxy`/`https_proxy` in `os.environ`** — breaks Google
   Sheets auth; scope any proxy to the specific downloader
 - **Pexels clips crash HyperFrames** unless re-encoded with
