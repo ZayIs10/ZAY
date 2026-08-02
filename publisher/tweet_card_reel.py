@@ -611,15 +611,17 @@ def run(row_index: int | None, *, topic: str | None = None, dry_run: bool,
         log.warning("Row %d already has a finished reel (%s) — refusing to "
                     "re-render. Pass --force to rebuild deliberately.",
                     row_index, existing_mp4)
-        # Write as LITTLE as possible: every write shows up as a row change on
-        # n8n's next poll, which is what feeds a dispatch loop. The one repair
-        # worth making is a claim left dangling by the duplicate dispatch —
-        # "Building" is meant to be transient, and a row stuck there looks
-        # in-progress forever.
-        if not dry_run and str(row.get("Status", "")).strip() == CLAIM_STATUS:
+        # A row we refuse to rebuild MUST end up at the terminal status, whatever
+        # it currently says. Otherwise it stays in a non-terminal state forever
+        # while nothing will ever act on it: "Building" reads as in-progress,
+        # "Ready to Run" gets re-dispatched by n8n every poll, and
+        # "Proxy Empty - Retry" gets re-picked by every proxy_recovery sweep.
+        # One write per row, once — the guard then short-circuits silently.
+        current = str(row.get("Status", "")).strip()
+        if not dry_run and current != DONE_STATUS:
             _try_update(reader, row_index, "Status", DONE_STATUS)
-            log.info("Repaired stale claim: Status %r -> %r.",
-                     CLAIM_STATUS, DONE_STATUS)
+            log.info("Repaired status of finished row: %r -> %r.",
+                     current or "(blank)", DONE_STATUS)
         return 0
 
     # Claim the row IMMEDIATELY so a re-poll (n8n fires every minute) sees
