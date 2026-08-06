@@ -119,12 +119,13 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "=https://api.github.com/repos/{{ $env.GITHUB_REPO }}/dispatches",
+        "url": "https://api.github.com/repos/ZayIs10/ZAY/dispatches",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             { "name": "Accept", "value": "application/vnd.github+json" },
-            { "name": "Authorization", "value": "=Bearer {{ $env.GITHUB_PAT }}" },
             { "name": "X-GitHub-Api-Version", "value": "2022-11-28" },
             { "name": "User-Agent", "value": "n8n-tweet-card-reel" }
           ]
@@ -140,7 +141,10 @@
       "typeVersion": 4.1,
       "position": [1300, 300],
       "onError": "continueErrorOutput",
-      "notes": "Fire the build-tweet-card-reel GitHub Action via repository_dispatch. The cloud worker does EVERYTHING else: self-finds media (keyless yt-dlp + brand scrape, demo-footage-first), REQUIRES a real video clip (skips the post if none is found - no still), renders the reel, uploads to Drive, and writes the final Status + Reel MP4 URL back to this row. If GITHUB_REPO/GITHUB_PAT use $env and your server blocks $env, paste the literal repo ('owner/repo') and a 'Bearer <PAT>' token directly here instead."
+      "credentials": {
+        "githubApi": { "id": "UHXtn1G7d8EMqfMh", "name": "GitHub account 2" }
+      },
+      "notes": "Fire the build-tweet-card-reel GitHub Action via repository_dispatch. The cloud worker does EVERYTHING else: self-finds media (keyless yt-dlp + brand scrape, demo-footage-first), REQUIRES a real video clip (skips the post if none is found - no still), renders the reel, uploads to Drive, and writes the final Status + Reel MP4 URL back to this row. AUTH: the PAT lives in the n8n 'githubApi' credential (GitHub account 2), NOT in a header and NOT in $env — this Hostinger host silently blocks {{ $env.X }}, and a hardcoded 'Bearer ghp_...' here rots the day the token expires (it did, 2026-08-02..08-06: every dispatch 401'd 'Bad credentials' and no reel built for 4 days). Rotate the token in ONE place: that credential."
     },
     {
       "parameters": {

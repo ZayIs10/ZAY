@@ -120,12 +120,13 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "=https://api.github.com/repos/{{ $env.GITHUB_REPO }}/dispatches",
+        "url": "https://api.github.com/repos/ZayIs10/ZAY/dispatches",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             { "name": "Accept", "value": "application/vnd.github+json" },
-            { "name": "Authorization", "value": "=Bearer {{ $env.GITHUB_PAT }}" },
             { "name": "X-GitHub-Api-Version", "value": "2022-11-28" },
             { "name": "User-Agent", "value": "n8n-carousel-builder" }
           ]
@@ -141,7 +142,10 @@
       "typeVersion": 4.1,
       "position": [1300, 300],
       "onError": "continueErrorOutput",
-      "notes": "Fire the build-carousel GitHub Action via repository_dispatch. client_payload.from_sheet='true' tells the workflow to AUTO-DRAFT the spec from the next 'Ready to Run' carousel row (draft_spec, cheap GPT text, usage-guarded) and then build it; to_drive='true' uploads the finished deck to Drive and emails the review link. The cloud worker does EVERYTHING else: draft spec -> per slide find real reference -> GPT-4o vision -> house-style prompt -> image -> render deck -> Drive -> review email -> write final Status + Drive URL back to this row. If GITHUB_REPO/GITHUB_PAT use $env and your server blocks $env, paste the literal repo ('owner/repo') and a 'Bearer <PAT>' token directly here instead."
+      "credentials": {
+        "githubApi": { "id": "UHXtn1G7d8EMqfMh", "name": "GitHub account 2" }
+      },
+      "notes": "Fire the build-carousel GitHub Action via repository_dispatch. client_payload.from_sheet='true' tells the workflow to AUTO-DRAFT the spec from the next 'Ready to Run' carousel row (draft_spec, cheap GPT text, usage-guarded) and then build it; to_drive='true' uploads the finished deck to Drive and emails the review link. The cloud worker does EVERYTHING else: draft spec -> per slide find real reference -> GPT-4o vision -> house-style prompt -> image -> render deck -> Drive -> review email -> write final Status + Drive URL back to this row. AUTH: the PAT lives in the n8n 'githubApi' credential (GitHub account 2) — same one Workflow B uses. NOT a header, NOT $env (this Hostinger host silently blocks {{ $env.X }}). The live copy of this node used to carry a hardcoded 'Bearer ghp_...' that went stale; rotate the token in the credential and BOTH workflows recover at once."
     },
     {
       "parameters": {
