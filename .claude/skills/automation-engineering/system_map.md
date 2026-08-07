@@ -93,9 +93,18 @@ Verified 2026-07-04. When an automation changes shape, update THIS file.
 
 ## Reel publishing
 
-- **Scheduled:** `.github/workflows/publish_due_reels.yml` — cron `0 12 * * *`
-  (= 8pm SGT peak window; check the file, the cron line has been toggled) →
+- **Scheduled with a review gate (2026-08-07):** `.github/workflows/
+  publish_due_reels.yml` — cron `0 19 * * *` = 3:00 AM MYT = 8-9pm Central
+  Europe (the target audience since the Europe geo pivot; India asleep) →
   `publisher/check_ig_token.py` then `publisher/publish_due_reels.py`.
+- **State machine:** build → `Ready to Post` (+ review email with Drive link,
+  caption, and "type Publish" instructions) → USER types `Publish` (accepted
+  in the live `Status` column OR the visible legacy col F `Published`) →
+  cron posts ONE approved reel per day, TOP-DOWN in sheet order → row flips
+  to `Published` (both columns mirrored) + Post URL + Published Date.
+  Failure → `Publish Failed` + alert email, NO auto-retry (set back to
+  `Publish` to retry). `Ready to Post` alone never publishes — the June
+  "no unreviewed auto-posting" rule still holds; approval is one word.
   Capped at ONE reel/day; the IG API cannot schedule (any
   `scheduled_publish_time` posts instantly), so the cron IS the scheduler.
 - **Container retry:** `.github/workflows/publish_reel_container.yml` →

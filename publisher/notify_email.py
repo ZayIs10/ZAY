@@ -91,24 +91,27 @@ def build_review_email(
     `caption` is the full Post Caption from the sheet — it already includes
     the hashtags, so it's sent verbatim as one copy-paste-ready block.
 
-    AUTO-PUBLISH IS DISABLED (2026-06-29, by user request). The build renders
-    the reel, uploads it to Drive, and emails this review link — but NOTHING
-    posts to Instagram automatically. The user reviews the reel (and can add
-    anything before it goes out) and posts it manually from the Drive link.
-    (`staged_ok` / `stage_detail` / `container_id` / `repo` are kept for
-    signature compatibility but unused.)
+    REVIEW GATE (2026-08-07): the build renders the reel, uploads it to
+    Drive, and emails this review link — NOTHING posts on its own. To
+    publish, the user types "Publish" on the sheet row; the daily 3am MYT
+    (Europe evening) run then posts approved rows one per day, top-down,
+    and flips each to "Published". (`staged_ok` / `stage_detail` /
+    `container_id` / `repo` are kept for signature compatibility but unused.)
     """
-    subject = f"[GenZ reel ready to review — post manually] {topic}"
+    subject = f"[GenZ reel ready to review — type Publish to queue] {topic}"
 
     caption_block = caption.strip() or "(no caption in sheet)"
 
     ig_block = (
-        "INSTAGRAM: NOT POSTED — REVIEW + POST MANUALLY\n"
+        "INSTAGRAM: NOT POSTED — REVIEW, THEN TYPE \"Publish\"\n"
         "------------------------------------------------------------\n"
-        "This reel is rendered and waiting for you. Auto-publishing is\n"
-        "OFF — nothing goes to Instagram on its own. When you're happy\n"
-        "with it (add anything you want first), download it from the\n"
-        "Drive link above and post it manually with the caption below.\n"
+        "This reel is rendered and waiting for you. Watch it at the\n"
+        "Drive link above; the caption below is what will be posted.\n"
+        "Happy with it? Open the sheet and set this row's status to\n"
+        "Publish (either status column works). It then goes live\n"
+        "automatically at 3:00 AM MYT (Europe evening peak) — one\n"
+        "queued reel per day, top row first — and the row flips to\n"
+        "Published. Not happy? Just leave it; nothing posts on its own.\n"
     )
 
     body = (

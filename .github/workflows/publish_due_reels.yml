@@ -1,30 +1,30 @@
-name: Publish Due Reels (8pm SGT)
+name: Publish Approved Reels (3am MYT / Europe evening)
 
-# REAL scheduling for Instagram reels.
+# REAL scheduling for Instagram reels — WITH a human review gate.
 #
 # The IG Graph API can't truly schedule — sending scheduled_publish_time is
 # silently ignored and the reel posts instantly (verified against a live post
-# 2026-06-18). So GitHub does the scheduling: the reel build renders + uploads
-# to Drive and leaves the row at Status="Ready to Post". This cron runs at the
-# peak Singapore/Malaysia evening window and publishes ONE queued reel per day
-# (the script's default cap) — so at most one reel goes live per day at 8pm SGT.
-# If several are queued they drain one-per-day on the following days.
+# 2026-06-18). So GitHub does the scheduling. The flow (2026-08-07):
 #
-# Schedule: 12:00 UTC daily = 8:00 PM SGT/MYT (UTC+8), every day.
-# (GitHub cron is always UTC and can lag a few minutes under load — that's fine
-#  for a peak-time post.)
+#   build → "Ready to Post" + review email     (rendered, waits for the user)
+#   user types "Publish" on the row            (approved — Status OR col F)
+#   this cron posts ONE approved reel per day  → row becomes "Published"
+#
+# Nothing posts unless the user typed "Publish" — this re-enables automation
+# WITHOUT undoing the 2026-06-29 "no unreviewed auto-posting" decision; the
+# review gate just moved from "post it yourself" to "type one word".
+# If several rows say "Publish" they drain one-per-day, top-down (row 69
+# today, row 70 tomorrow, ...).
+#
+# Schedule: 19:00 UTC daily = 3:00 AM MYT = 8pm CET / 9pm CEST — the target
+# EUROPEAN audience's evening peak (geo pivot, 2026-08-07). India is asleep.
+# (GitHub cron is always UTC and can lag a few minutes under load — fine.)
 #
 # Also runnable manually from the Actions UI (with an optional dry-run).
 
 "on":
-  # AUTO-PUBLISH DISABLED (2026-06-29, by user request).
-  # The build still renders + uploads to Drive + emails the link, but nothing
-  # posts to Instagram automatically anymore — the user reviews and posts
-  # manually from the Drive link. The daily cron below is intentionally
-  # commented out. Manual publishing is still available via the Actions "Run
-  # workflow" button (workflow_dispatch) if it's ever wanted.
-  # schedule:
-  #   - cron: "0 12 * * *"        # 12:00 UTC = 20:00 SGT, every day
+  schedule:
+    - cron: "0 19 * * *"          # 19:00 UTC = 03:00 MYT = Europe evening
   workflow_dispatch:
     inputs:
       dry_run:
@@ -139,10 +139,10 @@ jobs:
               from publisher.notify_email import send
               url = os.getenv("RUN_URL", "")
               send(
-                  "[GenZ ALERT] 8pm SGT publish run FAILED",
+                  "[GenZ ALERT] 3am MYT publish run FAILED",
                   "The scheduled reel-publish run did not finish successfully.\n\n"
-                  "Your queued reels (Status='Ready to Post') were NOT posted and\n"
-                  "remain queued — they'll go out at the next 8pm SGT run.\n\n"
+                  "Your approved reels (rows marked 'Publish') were NOT posted\n"
+                  "and remain queued — they'll go out at the next 3am MYT run.\n\n"
                   f"See what happened:\n{url}\n",
               )
               print("Failure-alert email sent.")

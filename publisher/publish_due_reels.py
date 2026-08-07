@@ -1,4 +1,4 @@
-"""Publish every reel that's queued and DUE, at peak Singapore/Malaysia time.
+"""Publish every reel the user has APPROVED, at the Europe evening window.
 
 WHY THIS EXISTS
 ---------------
@@ -7,13 +7,24 @@ live post (2026-06-18): sending `scheduled_publish_time` on /media_publish is
 SILENTLY IGNORED for Instagram — the reel publishes immediately. (That param
 only works for Facebook Pages, not IG.)
 
-So GitHub does the scheduling instead. The reel build renders the video, uploads
-it to Drive, and leaves the row at Status="Ready to Post". This script is run by
-a daily GitHub Actions cron at 12:00 UTC = 8:00 PM SGT (the peak SG/MY evening
-window). By DEFAULT it publishes ONE due reel per run = one post per day. If
-several reels are queued they drain one-per-day on the following days — so from
-the user's side, reels queue up whenever they render and go live at 8pm SGT, at
-most one per day. (Pass --limit 0 to publish every due reel in a single run.)
+So GitHub does the scheduling instead — WITH a human review gate (2026-08-07):
+
+  build → "Ready to Post" (+ review email)   ← rendered, waiting for the user
+  user types "Publish"                        ← approved, queued
+  daily cron posts ONE per day, top-down     → "Published"
+
+The reel build renders the video, uploads it to Drive, emails the review link,
+and leaves the row at Status="Ready to Post". NOTHING publishes until the user
+flips the row to "Publish" (no ED — the ED is earned). The user may type it in
+either the live `Status` column or the visible legacy `Published` column F;
+both are accepted, because Status sits far off-screen and col F is what's
+actually on the user's screen (the 2026-08-02 gate-drift lesson).
+
+This script runs on a daily GitHub Actions cron at 19:00 UTC = 3:00 AM MYT =
+8-9 PM Central Europe (the target audience's evening peak — see the Europe
+pivot, 2026-08-07). By DEFAULT it publishes ONE approved reel per run = one
+post per day. If several rows say "Publish" they drain one-per-day, top-down:
+row 69 today, row 70 tomorrow, and so on. (--limit 0 publishes all in one run.)
 
 WHY IT RE-CREATES THE CONTAINER
 -------------------------------
@@ -52,10 +63,24 @@ logging.basicConfig(
 )
 log = logging.getLogger("publish_due_reels")
 
-# Status values — mirror tweet_card_reel.py's state machine.
-READY_STATUS = "ready to post"      # queued by the build, waiting for peak time
+# Status values — extend tweet_card_reel.py's state machine with a review gate.
+# "Ready to Post" now means "rendered, awaiting the user's review" and is NOT
+# picked up here. Only the user's explicit approval word queues a publish.
+APPROVED_STATUS = "publish"         # typed by the USER: approved, queue it
 PUBLISHED_STATUS = "Published"      # terminal: live on Instagram
 FAILED_STATUS = "Publish Failed"    # publish attempt errored — left for retry/inspection
+
+# The Reels tab carries TWO status-ish columns: the live `Status` (far right,
+# off-screen) and the legacy `Published` at column F — the one actually visible
+# on the user's screen. The user may type "Publish" in either; accept both and
+# mirror every final status into col F when it's being used as a reel status
+# (same rule as tweet_card_reel._set_status, 2026-08-02 gate-drift lesson).
+LEGACY_STATUS_HEADER = "Published"
+_REEL_STATUS_WORDS = {
+    "ready to run", "building", "ready to post", "draft", "render failed",
+    "proxy empty - retry", "skipped - no video",
+    APPROVED_STATUS, PUBLISHED_STATUS.lower(), FAILED_STATUS.lower(),
+}
 
 
 def _config() -> dict:
@@ -70,8 +95,10 @@ def _config() -> dict:
 
 
 def _find_due_rows(ws) -> list[dict]:
-    """Return every row whose Status == 'Ready to Post' (trimmed, case-insensitive),
-    that has a usable Reel MP4 URL and isn't already published."""
+    """Return every row the user approved: 'Publish' (trimmed, case-insensitive)
+    in the live Status column OR the visible legacy col F, with a usable
+    Reel MP4 URL and not already published. Sheet order = queue order, so the
+    top-most approved row goes out first (row 69 today, row 70 tomorrow...)."""
     all_values = ws.get_all_values()
     if not all_values:
         return []
@@ -81,9 +108,11 @@ def _find_due_rows(ws) -> list[dict]:
         row = {headers[j]: (raw[j] if j < len(raw) else "")
                for j in range(len(headers))}
         status = str(row.get("Status", "")).strip().lower()
+        legacy = str(row.get(LEGACY_STATUS_HEADER, "")).strip().lower()
         already = str(row.get("Instagram Post", "")).strip().lower()
         mp4 = str(row.get("Reel MP4 URL", "")).strip()
-        if status == READY_STATUS and mp4 and already != "published":
+        approved = APPROVED_STATUS in (status, legacy)
+        if approved and mp4 and already != "published":
             row["_row_index"] = i
             due.append(row)
     return due
@@ -116,6 +145,24 @@ def _write(ws, row_index: int, header: str, value: str) -> None:
         log.warning("Could not write %r to row %d: %s", header, row_index, exc)
 
 
+def _set_status(ws, row_index: int, value: str) -> None:
+    """Write the live Status AND mirror into the visible legacy col F whenever
+    that cell holds one of our reel-status words (e.g. the user's "Publish").
+    A col-F value that isn't ours — a note, or the old pipeline's data — is
+    left alone. Keeps whichever column the user looks at telling the truth."""
+    _write(ws, row_index, "Status", value)
+    try:
+        headers = ws.row_values(1)
+        col = headers.index(LEGACY_STATUS_HEADER) + 1
+        current = str(ws.cell(row_index, col).value or "").strip()
+    except Exception as exc:  # noqa: BLE001 — cosmetic; Status already written
+        log.debug("Legacy %r column not mirrored: %s", LEGACY_STATUS_HEADER, exc)
+        return
+    if current.lower() not in _REEL_STATUS_WORDS or current == value:
+        return
+    _write(ws, row_index, LEGACY_STATUS_HEADER, value)
+
+
 def publish_one(ws, row: dict, ig_user_id: str, access_token: str,
                 *, dry_run: bool) -> bool:
     """Publish a single due reel. Returns True on success."""
@@ -146,12 +193,12 @@ def publish_one(ws, row: dict, ig_user_id: str, access_token: str,
         # doesn't kill the whole batch.
         log.error("Row %d publish failed: %s", row_index, exc)
         _write(ws, row_index, "Instagram Post", f"Publish failed: {exc}"[:200])
-        _write(ws, row_index, "Status", FAILED_STATUS)
+        _set_status(ws, row_index, FAILED_STATUS)
         return False
     except Exception as exc:  # noqa: BLE001
         log.error("Row %d publish error: %s", row_index, exc)
         _write(ws, row_index, "Instagram Post", f"Publish error: {exc}"[:200])
-        _write(ws, row_index, "Status", FAILED_STATUS)
+        _set_status(ws, row_index, FAILED_STATUS)
         return False
 
     permalink = fetch_permalink(media_id, access_token)
@@ -160,7 +207,7 @@ def publish_one(ws, row: dict, ig_user_id: str, access_token: str,
     _write(ws, row_index, "Instagram Post", "Published")
     _write(ws, row_index, "Post URL", permalink)
     _write(ws, row_index, "Published Date", now)
-    _write(ws, row_index, "Status", PUBLISHED_STATUS)
+    _set_status(ws, row_index, PUBLISHED_STATUS)
     log.info("Row %d PUBLISHED -> %s", row_index, permalink or media_id)
     return True
 
@@ -190,7 +237,7 @@ def main() -> int:
 
     due = _find_due_rows(ws)
     if not due:
-        log.info("No reels are due (no 'Ready to Post' rows). Nothing to publish.")
+        log.info("No approved reels (no row says 'Publish'). Nothing to post.")
         return 0
 
     if args.limit and len(due) > args.limit:
@@ -220,19 +267,19 @@ def main() -> int:
 
 
 def _alert_failures(failed: list[str], ok: int, total: int) -> None:
-    """Email the user that one or more reels failed to publish at 8pm SGT."""
+    """Email the user that one or more approved reels failed to publish."""
     try:
         from publisher.notify_email import send  # late import
         lines = "\n".join(f"  - {t}" for t in failed)
         subject = f"[GenZ ALERT] {len(failed)}/{total} reel(s) failed to publish"
         body = (
-            "The 8pm SGT auto-publish run hit problems.\n\n"
+            "The 3am MYT (Europe evening) auto-publish run hit problems.\n\n"
             f"Published OK: {ok}/{total}\n"
             f"FAILED: {len(failed)}\n{lines}\n\n"
-            "These rows are now marked Status='Publish Failed' in the sheet — "
-            "they will NOT auto-retry. Open the sheet to see the error in the "
-            "'Instagram Post' column. To retry, set the row's Status back to "
-            "'Ready to Post' and it'll go out at the next 8pm SGT.\n"
+            "These rows are now marked 'Publish Failed' in the sheet — they "
+            "will NOT auto-retry. Open the sheet to see the error in the "
+            "'Instagram Post' column. To retry, set the row back to "
+            "'Publish' and it'll go out at the next 3am MYT run.\n"
         )
         send(subject, body)
         log.info("Failure-alert email sent (%d failed).", len(failed))
