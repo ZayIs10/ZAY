@@ -146,6 +146,19 @@ Verified 2026-07-04. When an automation changes shape, update THIS file.
     to qualify (proves it converts). Fetched via a 2nd API call — see the
     two-step flow below. News/Reddit have no view metric and are exempt.
     More views also rank higher (600k beats 8k on a tie).
+  - **Creator + length gates (YouTube only, added 2026-08-16, user ask):**
+    (a) **NO Indian creators** — dropped when channel `snippet.country ==
+    'IN'` (via a `channels:list` call, 1 unit), OR video
+    `defaultAudioLanguage`/`defaultLanguage` is Indic (hi/ta/te/bn/mr/gu/
+    kn/ml/pa/ur/or/as/ne/si), OR Indic script (U+0900–U+0D7F) appears in
+    title/description/channel, OR Hinglish vocabulary (STRONG word list =
+    1 hit, e.g. `kaise/hindi/paise/dosto`; WEAK function words need ≥2).
+    (b) **NO short-form** — `contentDetails.duration` < 240 s (4 min) is
+    dropped; unknown duration fails closed. Both live in the two
+    `Code - Normalize YouTube *` nodes (candidates travel as ONE array item,
+    so a Code gate replaces an IF node); every rejection is logged in the
+    node output as `dropped_by_gates[{title, reason}]`. Real-data check
+    2026-08-16: 12/20 + 16/20 raw hits dropped, all correctly.
   - **Freshness:** anything >7 days old is dropped (when the source dates
     it); ≤2-day items get a bonus and win ties. YouTube `publishedAfter`
     is also 7 days.
@@ -156,13 +169,17 @@ Verified 2026-07-04. When an automation changes shape, update THIS file.
     or fuzzy-matches (≥60% token overlap, year/stop-words stripped) an
     existing topic OR an earlier pick this run, so re-running surfaces the
     NEXT-best fresh topics instead of re-appending last run's picks.
-  - **Two-step YouTube flow (for the view gate):** each YouTube branch is
-    `search → Code (collect videoIds + snippets) → HTTP videos:list
-    (part=statistics, batched ≤50 ids, 1 quota unit) → Code (merge views
-    back by id, normalize)`. search=100 units, videos:list=1 unit,
-    10k/day free → ~200 units/run, trivial. The normalizer reads the
-    snippet map back via `$('Code - YT Tools IDs').first().json.byId` — that
-    node-name string must match EXACTLY or the branch silently yields 0.
+  - **Four-step YouTube flow (view + creator + length gates):** each
+    YouTube branch is `search → Code - YT * IDs (collect videoIds +
+    snippets) → HTTP - YT * Stats (videos:list part=statistics,
+    contentDetails,snippet, ≤50 ids, 1 unit) → Code - YT * Channel IDs
+    (collect channelIds, carry stats) → HTTP - YT * Channels
+    (channels:list part=snippet, 1 unit) → Code - Normalize YouTube *`.
+    search=100 units, the two list calls=1 unit each, 10k/day free →
+    ~204 units/run, trivial. The normalizer reads upstream via
+    `$('Code - YT Tools IDs')` (snippets) and `$('Code - YT Tools Channel
+    IDs')` (stats) — those node-name strings must match EXACTLY or the
+    branch silently yields 0.
   - **YouTube key gotcha (root cause of the old repeats):** the Hostinger
     instance blocks `$env` in expressions (`N8N_BLOCK_ENV_ACCESS_IN_NODE`),
     so `{{ $env.YOUTUBE_API_KEY }}` failed → both YouTube nodes returned 0,

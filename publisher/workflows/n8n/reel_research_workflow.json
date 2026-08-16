@@ -16,7 +16,10 @@
       "name": "Schedule - Daily 6AM (disabled)",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.1,
-      "position": [200, 200],
+      "position": [
+        200,
+        200
+      ],
       "disabled": true
     },
     {
@@ -25,7 +28,10 @@
       "name": "Manual Trigger - Run On Demand",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
-      "position": [200, 460]
+      "position": [
+        200,
+        460
+      ]
     },
     {
       "parameters": {
@@ -34,8 +40,14 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "User-Agent", "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" },
-            { "name": "Accept", "value": "application/json" }
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
           ]
         },
         "options": {}
@@ -44,7 +56,10 @@
       "name": "HTTP - Reddit AI Posts",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [480, 60],
+      "position": [
+        480,
+        60
+      ],
       "onError": "continueRegularOutput"
     },
     {
@@ -54,12 +69,30 @@
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
-            { "name": "part", "value": "snippet" },
-            { "name": "type", "value": "video" },
-            { "name": "order", "value": "viewCount" },
-            { "name": "maxResults", "value": "20" },
-            { "name": "q", "value": "best AI tools 2026" },
-            { "name": "publishedAfter", "value": "={{ new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString() }}" }
+            {
+              "name": "part",
+              "value": "snippet"
+            },
+            {
+              "name": "type",
+              "value": "video"
+            },
+            {
+              "name": "order",
+              "value": "viewCount"
+            },
+            {
+              "name": "maxResults",
+              "value": "20"
+            },
+            {
+              "name": "q",
+              "value": "best AI tools 2026"
+            },
+            {
+              "name": "publishedAfter",
+              "value": "={{ new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString() }}"
+            }
           ]
         },
         "authentication": "genericCredentialType",
@@ -70,7 +103,10 @@
       "name": "HTTP - YouTube Best AI Tools",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [480, 240],
+      "position": [
+        480,
+        240
+      ],
       "onError": "continueRegularOutput",
       "credentials": {
         "httpQueryAuth": {
@@ -86,12 +122,30 @@
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
-            { "name": "part", "value": "snippet" },
-            { "name": "type", "value": "video" },
-            { "name": "order", "value": "viewCount" },
-            { "name": "maxResults", "value": "20" },
-            { "name": "q", "value": "how to use AI tutorial" },
-            { "name": "publishedAfter", "value": "={{ new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString() }}" }
+            {
+              "name": "part",
+              "value": "snippet"
+            },
+            {
+              "name": "type",
+              "value": "video"
+            },
+            {
+              "name": "order",
+              "value": "viewCount"
+            },
+            {
+              "name": "maxResults",
+              "value": "20"
+            },
+            {
+              "name": "q",
+              "value": "how to use AI tutorial"
+            },
+            {
+              "name": "publishedAfter",
+              "value": "={{ new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString() }}"
+            }
           ]
         },
         "authentication": "genericCredentialType",
@@ -102,7 +156,10 @@
       "name": "HTTP - YouTube AI How-To",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [480, 420],
+      "position": [
+        480,
+        420
+      ],
       "onError": "continueRegularOutput",
       "credentials": {
         "httpQueryAuth": {
@@ -120,7 +177,10 @@
       "name": "RSS - TechCrunch AI",
       "type": "n8n-nodes-base.rssFeedRead",
       "typeVersion": 1.1,
-      "position": [480, 600],
+      "position": [
+        480,
+        600
+      ],
       "onError": "continueRegularOutput"
     },
     {
@@ -131,7 +191,10 @@
       "name": "Code - YT Tools IDs",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [720, 200]
+      "position": [
+        720,
+        200
+      ]
     },
     {
       "parameters": {
@@ -141,7 +204,10 @@
       "name": "Code - YT How-To IDs",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [720, 400]
+      "position": [
+        720,
+        400
+      ]
     },
     {
       "parameters": {
@@ -150,8 +216,14 @@
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
-            { "name": "part", "value": "statistics" },
-            { "name": "id", "value": "={{ $json.ids }}" }
+            {
+              "name": "part",
+              "value": "statistics,contentDetails,snippet"
+            },
+            {
+              "name": "id",
+              "value": "={{ $json.ids }}"
+            }
           ]
         },
         "authentication": "genericCredentialType",
@@ -162,7 +234,10 @@
       "name": "HTTP - YT Tools Stats",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [960, 200],
+      "position": [
+        960,
+        200
+      ],
       "onError": "continueRegularOutput",
       "credentials": {
         "httpQueryAuth": {
@@ -178,8 +253,14 @@
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
-            { "name": "part", "value": "statistics" },
-            { "name": "id", "value": "={{ $json.ids }}" }
+            {
+              "name": "part",
+              "value": "statistics,contentDetails,snippet"
+            },
+            {
+              "name": "id",
+              "value": "={{ $json.ids }}"
+            }
           ]
         },
         "authentication": "genericCredentialType",
@@ -190,7 +271,10 @@
       "name": "HTTP - YT How-To Stats",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [960, 400],
+      "position": [
+        960,
+        400
+      ],
       "onError": "continueRegularOutput",
       "credentials": {
         "httpQueryAuth": {
@@ -201,23 +285,29 @@
     },
     {
       "parameters": {
-        "jsCode": "// Merge view stats back onto the search snippets (by video id) and emit a\n// normalized candidate list with a real viewCount (engagement = views).\n// $json is the stats response; the snippets are on the IDs node output.\nconst stats = ($input.first() && $input.first().json) || {};\nconst byViews = {};\nfor (const v of (stats.items || [])) {\n  const n = v && v.statistics ? Number(v.statistics.viewCount) : NaN;\n  byViews[v.id] = isFinite(n) ? n : 0;\n}\n// Pull the snippet map from the IDs node (same branch, upstream).\nlet byId = {};\ntry { byId = $('Code - YT Tools IDs').first().json.byId || {}; } catch (e) { byId = {}; }\nconst candidates = Object.keys(byId).map(id => ({\n  ...byId[id],\n  engagement: byViews[id] || 0,   // real YouTube views\n  view_count: byViews[id] || 0\n}));\nreturn [{ json: { candidates } }];"
+        "jsCode": "// Merge stats + duration + language + channel country back onto the search\n// snippets (by video id), then apply the HARD GATES the user asked for:\n//   1) NO Indian creators  -> channel country IN, Indic audio/default language,\n//      Indic script in title/desc/channel, or Hinglish vocabulary\n//   2) NO short-form       -> duration must be >= 4 min (240 s)\n// $json = channels:list response; stats via $('Code - YT Tools Channel IDs'); snippets via $('Code - YT Tools IDs').\nconst chRes = ($input.first() && $input.first().json) || {};\nlet stats = {};\ntry { stats = $('Code - YT Tools Channel IDs').first().json.stats || {}; } catch (e) { stats = {}; }\nlet byId = {};\ntry { byId = $('Code - YT Tools IDs').first().json.byId || {}; } catch (e) { byId = {}; }\n\n// ---- channel country map (may be empty: many channels never set country)\nconst countryByChannel = {};\nfor (const c of (chRes.items || [])) {\n  if (c && c.id) countryByChannel[c.id] = ((c.snippet && c.snippet.country) || '').toUpperCase();\n}\n\n// ---- helpers\nconst MIN_SECONDS = 240; // < 4 min = short-form -> drop\nfunction isoToSeconds(iso) {\n  const m = /^P(?:(\\d+)D)?T?(?:(\\d+)H)?(?:(\\d+)M)?(?:(\\d+)S)?$/.exec(iso || '');\n  if (!m) return null;\n  return (+m[1] || 0) * 86400 + (+m[2] || 0) * 3600 + (+m[3] || 0) * 60 + (+m[4] || 0);\n}\n// Indic language codes YouTube reports in defaultAudioLanguage / defaultLanguage\nconst INDIC_LANG = /^(hi|ta|te|bn|mr|gu|kn|ml|pa|ur|or|as|ne|si)(-|$)/i;\n// Devanagari, Bengali, Gurmukhi, Gujarati, Oriya, Tamil, Telugu, Kannada, Malayalam\nconst INDIC_SCRIPT = /[\\u0900-\\u0D7F]/;\n// Hinglish / Indian-market vocabulary. STRONG = one hit is enough.\nconst STRONG = /\\b(hindi|hinglish|in hindi|hindi me|hindi mein|urdu|tamil|telugu|malayalam|kannada|bengali|bangla|marathi|gujarati|punjabi|kaise|kaise banaye|kaise kare|kaise karen|kaise karein|kaise banaen|tarika|tareeka|sikhe|sikho|seekho|seekhe|sikhiye|paise|paisa|kamao|kamaye|kamaen|dosto|doston|bhaiyo|bhai log|namaste|namaskar|desi|jugaad|rupees|lakh|lakhs|crore|crores|india|indian|bharat)\\b/i;\n// WEAK = common Hindi function words; need >= 2 distinct hits to trigger.\nconst WEAK = /\\b(hai|hain|kya|karo|kare|karen|karein|aap|apna|apne|dekho|dekhe|banao|banaye|jaldi|ke liye|wala|wale|sabse|accha|acha|bahut|bilkul|zaroor|abhi|yaha|yahan)\\b/gi;\n\nfunction indianReason(cand, v) {\n  const sn = (v && v.snippet) || {};\n  const country = countryByChannel[sn.channelId] || '';\n  if (country === 'IN') return 'channel_country_IN';\n  const lang = sn.defaultAudioLanguage || sn.defaultLanguage || '';\n  if (INDIC_LANG.test(lang)) return 'audio_language_' + lang;\n  const text = [cand.title, cand.summary, sn.channelTitle, sn.title, sn.description].filter(Boolean).join(' \\n ');\n  if (INDIC_SCRIPT.test(text)) return 'indic_script';\n  const s = STRONG.exec(text);\n  if (s) return 'hinglish_word:' + s[1].toLowerCase();\n  const weak = new Set((text.match(WEAK) || []).map(x => x.toLowerCase()));\n  if (weak.size >= 2) return 'hinglish_words:' + Array.from(weak).join('+');\n  return null;\n}\n\nconst byVideo = {};\nfor (const v of (stats.items || [])) if (v && v.id) byVideo[v.id] = v;\n\nconst candidates = [];\nconst dropped = [];\nfor (const id of Object.keys(byId)) {\n  const v = byVideo[id];\n  const views = v && v.statistics ? Number(v.statistics.viewCount) : NaN;\n  const cand = {\n    ...byId[id],\n    engagement: isFinite(views) ? views : 0,   // real YouTube views\n    view_count: isFinite(views) ? views : 0,\n    duration_seconds: isoToSeconds(v && v.contentDetails && v.contentDetails.duration),\n    channel_title: (v && v.snippet && v.snippet.channelTitle) || '',\n    channel_country: countryByChannel[(v && v.snippet && v.snippet.channelId) || ''] || '',\n    audio_language: (v && v.snippet && (v.snippet.defaultAudioLanguage || v.snippet.defaultLanguage)) || ''\n  };\n  // GATE 2: short-form. Unknown duration fails closed (we can't prove it's long).\n  if (cand.duration_seconds === null || cand.duration_seconds < MIN_SECONDS) {\n    dropped.push({ title: cand.title, reason: 'short_form_' + (cand.duration_seconds === null ? 'unknown' : cand.duration_seconds + 's') });\n    continue;\n  }\n  // GATE 1: Indian creator.\n  const why = indianReason(cand, v);\n  if (why) { dropped.push({ title: cand.title, reason: 'indian_creator:' + why }); continue; }\n  candidates.push(cand);\n}\nreturn [{ json: { candidates, dropped_by_gates: dropped } }];"
       },
       "id": "node_r7_norm_yt_tools",
       "name": "Code - Normalize YouTube Tools",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1200, 200]
+      "position": [
+        1680,
+        208
+      ]
     },
     {
       "parameters": {
-        "jsCode": "// (same as Normalize YouTube Tools, for the how-to branch)\nconst stats = ($input.first() && $input.first().json) || {};\nconst byViews = {};\nfor (const v of (stats.items || [])) {\n  const n = v && v.statistics ? Number(v.statistics.viewCount) : NaN;\n  byViews[v.id] = isFinite(n) ? n : 0;\n}\nlet byId = {};\ntry { byId = $('Code - YT How-To IDs').first().json.byId || {}; } catch (e) { byId = {}; }\nconst candidates = Object.keys(byId).map(id => ({\n  ...byId[id],\n  engagement: byViews[id] || 0,\n  view_count: byViews[id] || 0\n}));\nreturn [{ json: { candidates } }];"
+        "jsCode": "// Merge stats + duration + language + channel country back onto the search\n// snippets (by video id), then apply the HARD GATES the user asked for:\n//   1) NO Indian creators  -> channel country IN, Indic audio/default language,\n//      Indic script in title/desc/channel, or Hinglish vocabulary\n//   2) NO short-form       -> duration must be >= 4 min (240 s)\n// $json = channels:list response; stats via $('Code - YT How-To Channel IDs'); snippets via $('Code - YT How-To IDs').\nconst chRes = ($input.first() && $input.first().json) || {};\nlet stats = {};\ntry { stats = $('Code - YT How-To Channel IDs').first().json.stats || {}; } catch (e) { stats = {}; }\nlet byId = {};\ntry { byId = $('Code - YT How-To IDs').first().json.byId || {}; } catch (e) { byId = {}; }\n\n// ---- channel country map (may be empty: many channels never set country)\nconst countryByChannel = {};\nfor (const c of (chRes.items || [])) {\n  if (c && c.id) countryByChannel[c.id] = ((c.snippet && c.snippet.country) || '').toUpperCase();\n}\n\n// ---- helpers\nconst MIN_SECONDS = 240; // < 4 min = short-form -> drop\nfunction isoToSeconds(iso) {\n  const m = /^P(?:(\\d+)D)?T?(?:(\\d+)H)?(?:(\\d+)M)?(?:(\\d+)S)?$/.exec(iso || '');\n  if (!m) return null;\n  return (+m[1] || 0) * 86400 + (+m[2] || 0) * 3600 + (+m[3] || 0) * 60 + (+m[4] || 0);\n}\n// Indic language codes YouTube reports in defaultAudioLanguage / defaultLanguage\nconst INDIC_LANG = /^(hi|ta|te|bn|mr|gu|kn|ml|pa|ur|or|as|ne|si)(-|$)/i;\n// Devanagari, Bengali, Gurmukhi, Gujarati, Oriya, Tamil, Telugu, Kannada, Malayalam\nconst INDIC_SCRIPT = /[\\u0900-\\u0D7F]/;\n// Hinglish / Indian-market vocabulary. STRONG = one hit is enough.\nconst STRONG = /\\b(hindi|hinglish|in hindi|hindi me|hindi mein|urdu|tamil|telugu|malayalam|kannada|bengali|bangla|marathi|gujarati|punjabi|kaise|kaise banaye|kaise kare|kaise karen|kaise karein|kaise banaen|tarika|tareeka|sikhe|sikho|seekho|seekhe|sikhiye|paise|paisa|kamao|kamaye|kamaen|dosto|doston|bhaiyo|bhai log|namaste|namaskar|desi|jugaad|rupees|lakh|lakhs|crore|crores|india|indian|bharat)\\b/i;\n// WEAK = common Hindi function words; need >= 2 distinct hits to trigger.\nconst WEAK = /\\b(hai|hain|kya|karo|kare|karen|karein|aap|apna|apne|dekho|dekhe|banao|banaye|jaldi|ke liye|wala|wale|sabse|accha|acha|bahut|bilkul|zaroor|abhi|yaha|yahan)\\b/gi;\n\nfunction indianReason(cand, v) {\n  const sn = (v && v.snippet) || {};\n  const country = countryByChannel[sn.channelId] || '';\n  if (country === 'IN') return 'channel_country_IN';\n  const lang = sn.defaultAudioLanguage || sn.defaultLanguage || '';\n  if (INDIC_LANG.test(lang)) return 'audio_language_' + lang;\n  const text = [cand.title, cand.summary, sn.channelTitle, sn.title, sn.description].filter(Boolean).join(' \\n ');\n  if (INDIC_SCRIPT.test(text)) return 'indic_script';\n  const s = STRONG.exec(text);\n  if (s) return 'hinglish_word:' + s[1].toLowerCase();\n  const weak = new Set((text.match(WEAK) || []).map(x => x.toLowerCase()));\n  if (weak.size >= 2) return 'hinglish_words:' + Array.from(weak).join('+');\n  return null;\n}\n\nconst byVideo = {};\nfor (const v of (stats.items || [])) if (v && v.id) byVideo[v.id] = v;\n\nconst candidates = [];\nconst dropped = [];\nfor (const id of Object.keys(byId)) {\n  const v = byVideo[id];\n  const views = v && v.statistics ? Number(v.statistics.viewCount) : NaN;\n  const cand = {\n    ...byId[id],\n    engagement: isFinite(views) ? views : 0,   // real YouTube views\n    view_count: isFinite(views) ? views : 0,\n    duration_seconds: isoToSeconds(v && v.contentDetails && v.contentDetails.duration),\n    channel_title: (v && v.snippet && v.snippet.channelTitle) || '',\n    channel_country: countryByChannel[(v && v.snippet && v.snippet.channelId) || ''] || '',\n    audio_language: (v && v.snippet && (v.snippet.defaultAudioLanguage || v.snippet.defaultLanguage)) || ''\n  };\n  // GATE 2: short-form. Unknown duration fails closed (we can't prove it's long).\n  if (cand.duration_seconds === null || cand.duration_seconds < MIN_SECONDS) {\n    dropped.push({ title: cand.title, reason: 'short_form_' + (cand.duration_seconds === null ? 'unknown' : cand.duration_seconds + 's') });\n    continue;\n  }\n  // GATE 1: Indian creator.\n  const why = indianReason(cand, v);\n  if (why) { dropped.push({ title: cand.title, reason: 'indian_creator:' + why }); continue; }\n  candidates.push(cand);\n}\nreturn [{ json: { candidates, dropped_by_gates: dropped } }];"
       },
       "id": "node_r8_norm_yt_howto",
       "name": "Code - Normalize YouTube How-To",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1200, 400]
+      "position": [
+        1680,
+        400
+      ]
     },
     {
       "parameters": {
@@ -227,7 +317,10 @@
       "name": "Code - Normalize Reddit",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1200, 60]
+      "position": [
+        1680,
+        60
+      ]
     },
     {
       "parameters": {
@@ -237,7 +330,10 @@
       "name": "Code - Normalize RSS",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1200, 600]
+      "position": [
+        1680,
+        600
+      ]
     },
     {
       "parameters": {
@@ -257,7 +353,10 @@
       "name": "Google Sheets - Read Existing Topics",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.4,
-      "position": [960, 780],
+      "position": [
+        960,
+        780
+      ],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
       "credentials": {
@@ -275,7 +374,10 @@
       "name": "Code - Normalize Existing Topics",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1200, 780]
+      "position": [
+        1680,
+        780
+      ]
     },
     {
       "parameters": {
@@ -286,7 +388,10 @@
       "name": "Merge - All Candidates",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3,
-      "position": [1480, 380]
+      "position": [
+        1960,
+        380
+      ]
     },
     {
       "parameters": {
@@ -296,7 +401,10 @@
       "name": "Code - Score AI-Fit & Pick Top",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1740, 380]
+      "position": [
+        2220,
+        380
+      ]
     },
     {
       "parameters": {
@@ -313,7 +421,10 @@
               "id": "cond_not_skip",
               "leftValue": "={{ $json.skip === true }}",
               "rightValue": true,
-              "operator": { "type": "boolean", "operation": "notEquals" }
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
             }
           ]
         },
@@ -323,7 +434,10 @@
       "name": "IF - Has AI Topics?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [2000, 380]
+      "position": [
+        2480,
+        380
+      ]
     },
     {
       "parameters": {
@@ -333,7 +447,10 @@
       "name": "Code - Build Bare Reel Rows",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2260, 300]
+      "position": [
+        2740,
+        300
+      ]
     },
     {
       "parameters": {
@@ -350,7 +467,9 @@
         },
         "columns": {
           "mappingMode": "autoMapInputData",
-          "matchingColumns": ["Topic"]
+          "matchingColumns": [
+            "Topic"
+          ]
         },
         "options": {}
       },
@@ -358,7 +477,10 @@
       "name": "Google Sheets - Append Ready Row",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.4,
-      "position": [2520, 300],
+      "position": [
+        3000,
+        300
+      ],
       "credentials": {
         "googleSheetsOAuth2Api": {
           "id": "AKkpUn5IypddfmfE",
@@ -374,7 +496,10 @@
       "name": "Code - Build Email Summary",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2780, 300]
+      "position": [
+        3260,
+        300
+      ]
     },
     {
       "parameters": {
@@ -390,96 +515,445 @@
       "name": "Gmail - Notify Topics Queued",
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
-      "position": [3040, 300],
+      "position": [
+        3520,
+        300
+      ],
       "credentials": {
         "gmailOAuth2": {
           "id": "Wx9U0wyKwyNtqtEu",
           "name": "Gmail account 3"
         }
       }
+    },
+    {
+      "parameters": {
+        "jsCode": "// videos:list response -> collect the unique channelIds for a channels:list call\n// (channel country tells us where the creator is). Carries the stats payload\n// forward so the normalizer can read it via $('Code - YT Tools Channel IDs'). Tolerates a failed\n// stats call (empty channelIds -> the channels call 400s -> normalizer degrades).\nconst stats = ($input.first() && $input.first().json) || {};\nconst seen = new Set();\nfor (const v of (stats.items || [])) {\n  const cid = v && v.snippet && v.snippet.channelId;\n  if (cid) seen.add(cid);\n}\nconst channelIds = Array.from(seen).slice(0, 50); // channels:list caps at 50 ids/call\nreturn [{ json: { channelIds: channelIds.join(','), stats } }];"
+      },
+      "id": "node_r24_chids_tools",
+      "name": "Code - YT Tools Channel IDs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/youtube/v3/channels",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "part",
+              "value": "snippet"
+            },
+            {
+              "name": "id",
+              "value": "={{ $json.channelIds }}"
+            }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "options": {}
+      },
+      "id": "node_r25_channels_tools",
+      "name": "HTTP - YT Tools Channels",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1440,
+        208
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "vg0eQOmN5gigPYdB",
+          "name": "YouTube Data API key (query)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// videos:list response -> collect the unique channelIds for a channels:list call\n// (channel country tells us where the creator is). Carries the stats payload\n// forward so the normalizer can read it via $('Code - YT How-To Channel IDs'). Tolerates a failed\n// stats call (empty channelIds -> the channels call 400s -> normalizer degrades).\nconst stats = ($input.first() && $input.first().json) || {};\nconst seen = new Set();\nfor (const v of (stats.items || [])) {\n  const cid = v && v.snippet && v.snippet.channelId;\n  if (cid) seen.add(cid);\n}\nconst channelIds = Array.from(seen).slice(0, 50); // channels:list caps at 50 ids/call\nreturn [{ json: { channelIds: channelIds.join(','), stats } }];"
+      },
+      "id": "node_r24_chids_howto",
+      "name": "Code - YT How-To Channel IDs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/youtube/v3/channels",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "part",
+              "value": "snippet"
+            },
+            {
+              "name": "id",
+              "value": "={{ $json.channelIds }}"
+            }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "options": {}
+      },
+      "id": "node_r25_channels_howto",
+      "name": "HTTP - YT How-To Channels",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1440,
+        400
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "vg0eQOmN5gigPYdB",
+          "name": "YouTube Data API key (query)"
+        }
+      }
     }
   ],
   "connections": {
     "Schedule - Daily 6AM (disabled)": {
-      "main": [[
-        { "node": "HTTP - Reddit AI Posts", "type": "main", "index": 0 },
-        { "node": "HTTP - YouTube Best AI Tools", "type": "main", "index": 0 },
-        { "node": "HTTP - YouTube AI How-To", "type": "main", "index": 0 },
-        { "node": "RSS - TechCrunch AI", "type": "main", "index": 0 },
-        { "node": "Google Sheets - Read Existing Topics", "type": "main", "index": 0 }
-      ]]
+      "main": [
+        [
+          {
+            "node": "HTTP - Reddit AI Posts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP - YouTube Best AI Tools",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP - YouTube AI How-To",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS - TechCrunch AI",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Google Sheets - Read Existing Topics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Manual Trigger - Run On Demand": {
-      "main": [[
-        { "node": "HTTP - Reddit AI Posts", "type": "main", "index": 0 },
-        { "node": "HTTP - YouTube Best AI Tools", "type": "main", "index": 0 },
-        { "node": "HTTP - YouTube AI How-To", "type": "main", "index": 0 },
-        { "node": "RSS - TechCrunch AI", "type": "main", "index": 0 },
-        { "node": "Google Sheets - Read Existing Topics", "type": "main", "index": 0 }
-      ]]
+      "main": [
+        [
+          {
+            "node": "HTTP - Reddit AI Posts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP - YouTube Best AI Tools",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP - YouTube AI How-To",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS - TechCrunch AI",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Google Sheets - Read Existing Topics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "HTTP - Reddit AI Posts": {
-      "main": [[{ "node": "Code - Normalize Reddit", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Code - Normalize Reddit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "HTTP - YouTube Best AI Tools": {
-      "main": [[{ "node": "Code - YT Tools IDs", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Code - YT Tools IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Code - YT Tools IDs": {
-      "main": [[{ "node": "HTTP - YT Tools Stats", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "HTTP - YT Tools Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "HTTP - YT Tools Stats": {
-      "main": [[{ "node": "Code - Normalize YouTube Tools", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Code - YT Tools Channel IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "HTTP - YouTube AI How-To": {
-      "main": [[{ "node": "Code - YT How-To IDs", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Code - YT How-To IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Code - YT How-To IDs": {
-      "main": [[{ "node": "HTTP - YT How-To Stats", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "HTTP - YT How-To Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "HTTP - YT How-To Stats": {
-      "main": [[{ "node": "Code - Normalize YouTube How-To", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Code - YT How-To Channel IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "RSS - TechCrunch AI": {
-      "main": [[{ "node": "Code - Normalize RSS", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Code - Normalize RSS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Google Sheets - Read Existing Topics": {
-      "main": [[{ "node": "Code - Normalize Existing Topics", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Code - Normalize Existing Topics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Code - Normalize Reddit": {
-      "main": [[{ "node": "Merge - All Candidates", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Merge - All Candidates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Code - Normalize YouTube Tools": {
-      "main": [[{ "node": "Merge - All Candidates", "type": "main", "index": 1 }]]
+      "main": [
+        [
+          {
+            "node": "Merge - All Candidates",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
     },
     "Code - Normalize YouTube How-To": {
-      "main": [[{ "node": "Merge - All Candidates", "type": "main", "index": 2 }]]
+      "main": [
+        [
+          {
+            "node": "Merge - All Candidates",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
     },
     "Code - Normalize RSS": {
-      "main": [[{ "node": "Merge - All Candidates", "type": "main", "index": 3 }]]
+      "main": [
+        [
+          {
+            "node": "Merge - All Candidates",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
     },
     "Code - Normalize Existing Topics": {
-      "main": [[{ "node": "Merge - All Candidates", "type": "main", "index": 4 }]]
+      "main": [
+        [
+          {
+            "node": "Merge - All Candidates",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
     },
     "Merge - All Candidates": {
-      "main": [[{ "node": "Code - Score AI-Fit & Pick Top", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Code - Score AI-Fit & Pick Top",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Code - Score AI-Fit & Pick Top": {
-      "main": [[{ "node": "IF - Has AI Topics?", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "IF - Has AI Topics?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "IF - Has AI Topics?": {
       "main": [
-        [{ "node": "Code - Build Bare Reel Rows", "type": "main", "index": 0 }],
+        [
+          {
+            "node": "Code - Build Bare Reel Rows",
+            "type": "main",
+            "index": 0
+          }
+        ],
         []
       ]
     },
     "Code - Build Bare Reel Rows": {
-      "main": [[{ "node": "Google Sheets - Append Ready Row", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Google Sheets - Append Ready Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Google Sheets - Append Ready Row": {
-      "main": [[{ "node": "Code - Build Email Summary", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Code - Build Email Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Code - Build Email Summary": {
-      "main": [[{ "node": "Gmail - Notify Topics Queued", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Gmail - Notify Topics Queued",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - YT Tools Channel IDs": {
+      "main": [
+        [
+          {
+            "node": "HTTP - YT Tools Channels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - YT Tools Channels": {
+      "main": [
+        [
+          {
+            "node": "Code - Normalize YouTube Tools",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - YT How-To Channel IDs": {
+      "main": [
+        [
+          {
+            "node": "HTTP - YT How-To Channels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - YT How-To Channels": {
+      "main": [
+        [
+          {
+            "node": "Code - Normalize YouTube How-To",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
