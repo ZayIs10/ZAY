@@ -11,9 +11,13 @@ name: Refresh Instagram Token (weekly)
 # "skipped" (exit 3 → job fails with the reason in the log) so it can't rot
 # silently.
 
+# 2026-08-24 UPDATE: the token is now a Business Manager SYSTEM USER token
+# (debug_token: expires_at=0 → never expires), so the weekly cron is OFF.
+# Keep this as a manual tool only in case a 60-day user token is ever used
+# again — then re-enable the schedule below.
 "on":
-  schedule:
-    - cron: "0 6 * * 1"          # Mondays 06:00 UTC
+  # schedule:
+  #   - cron: "0 6 * * 1"        # Mondays 06:00 UTC (disabled — token never expires)
   workflow_dispatch:
     inputs:
       force:

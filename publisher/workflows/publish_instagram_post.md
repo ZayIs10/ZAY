@@ -61,3 +61,9 @@ with `instagram_basic, instagram_content_publish, pages_show_list,
 pages_read_engagement, business_management` → Exchange for long-lived token),
 then: `gh secret set INSTAGRAM_ACCESS_TOKEN` and update `.env`.
 Verify with `python publisher/check_ig_token.py`.
+
+**Update 2026-08-24:** the secret now holds a Business Manager **System User**
+token (`debug_token` → `type: SYSTEM_USER`, `expires_at: 0` = never expires,
+all publish scopes). So no more 60-day expiry; `refresh_ig_token.yml` is kept
+manual-only (cron commented out). If a 60-day *user* token is ever used
+again, re-enable that cron and add `FB_APP_SECRET` + `ACTIONS_SECRETS_PAT`.
