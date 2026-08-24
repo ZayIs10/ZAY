@@ -94,10 +94,10 @@ jobs:
       - name: Check Instagram token (read-only, posts nothing)
         # Validates the INSTAGRAM_ACCESS_TOKEN secret before we try to publish:
         # is it valid, when does it expire, can it see + publish to the account.
-        # Doesn't fail the job (continue-on-error) — the publish step will still
-        # try, and any real failure triggers the alert email. This just surfaces
-        # an expiring/broken token clearly in the log.
-        continue-on-error: true
+        # HARD GATE (2026-08-24): an expired token used to be continue-on-error,
+        # so the run stayed GREEN while publishing nothing for a week. Now a
+        # dead token = red run + the failure-alert email, and the publish step
+        # never runs (rows stay "Publish", not "Publish Failed").
         run: python publisher/check_ig_token.py
 
       - name: Publish due reels (one per day by default)

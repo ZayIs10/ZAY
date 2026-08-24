@@ -1,0 +1,89 @@
+name: Refresh Instagram Token (weekly)
+
+# WHY (2026-08-24): the 60-day long-lived Meta token expired on 18-Aug-26 and
+# nightly auto-publish silently posted nothing for a week. A still-valid token
+# CAN be exchanged for a fresh 60-day one; an expired one cannot. So: every
+# Monday, if < 30 days remain, exchange it and rewrite the GitHub secret.
+#
+# Required secrets: INSTAGRAM_ACCESS_TOKEN, FB_APP_ID, FB_APP_SECRET,
+# ACTIONS_SECRETS_PAT (PAT with `repo` scope — GITHUB_TOKEN can't write secrets).
+# If FB_APP_SECRET / ACTIONS_SECRETS_PAT are missing the run is a clear
+# "skipped" (exit 3 → job fails with the reason in the log) so it can't rot
+# silently.
+
+"on":
+  schedule:
+    - cron: "0 6 * * 1"          # Mondays 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "true = refresh even if > 30 days remain"
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+
+concurrency:
+  group: refresh-ig-token
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
+      FB_APP_ID: ${{ secrets.FB_APP_ID }}
+      FB_APP_SECRET: ${{ secrets.FB_APP_SECRET }}
+      GH_TOKEN: ${{ secrets.ACTIONS_SECRETS_PAT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests
+
+      - name: Exchange token if it is within 30 days of expiry
+        id: refresh
+        run: |
+          set -o pipefail
+          ARGS=""
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then ARGS="--force"; fi
+          NEW=$(python publisher/refresh_ig_token.py --print $ARGS) || {
+            rc=$?
+            if [ $rc -eq 3 ]; then
+              echo "::error::FB_APP_ID / FB_APP_SECRET secret missing — add them so the token can auto-renew."
+            fi
+            exit $rc
+          }
+          if [ -z "$NEW" ]; then
+            echo "No refresh needed."
+            exit 0
+          fi
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::ACTIONS_SECRETS_PAT secret missing — got a new token but cannot store it."
+            exit 1
+          fi
+          printf '%s' "$NEW" | gh secret set INSTAGRAM_ACCESS_TOKEN --repo "${{ github.repository }}"
+          echo "INSTAGRAM_ACCESS_TOKEN secret updated with a fresh 60-day token."
+
+      - name: Email alert if refresh failed
+        if: failure()
+        env:
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          pip install -q python-dotenv >/dev/null 2>&1 || true
+          python - <<'PY'
+          import os
+          try:
+              from publisher.notify_email import send
+              send("[GenZ ALERT] Instagram token auto-refresh FAILED",
+                   "The weekly token refresh failed. If it is not fixed before the "
+                   "current token expires, auto-publish will stop.\n\nRun: "
+                   + os.getenv("RUN_URL", ""))
+          except Exception as exc:
+              print("alert email skipped:", exc)
+          PY

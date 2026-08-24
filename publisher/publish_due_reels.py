@@ -212,6 +212,62 @@ def publish_one(ws, row: dict, ig_user_id: str, access_token: str,
     return True
 
 
+
+def _token_alive(access_token: str) -> tuple[bool, str]:
+    """Read-only pre-flight: is the IG token still valid? (Graph debug_token.)
+
+    WHY (2026-08-24): the long-lived token silently expired on 18-Aug-26 and
+    every nightly run went GREEN while publishing 0/1 — the script caught the
+    OAuthException, marked the approved row "Publish Failed", and moved on.
+    Four approved reels were stranded over a week. A dead token is NOT the
+    row's fault, so we now refuse to touch the sheet at all: abort loudly
+    (non-zero exit → red run) and email a token-specific alert instead.
+    """
+    import requests  # late import
+    try:
+        r = requests.get(
+            "https://graph.facebook.com/v21.0/debug_token",
+            params={"input_token": access_token, "access_token": access_token},
+            timeout=30,
+        )
+        js = r.json()
+    except Exception as exc:  # noqa: BLE001 — network blip: don't block a publish
+        log.warning("Token pre-flight could not run (%s) — continuing.", exc)
+        return True, ""
+    err = js.get("error") or {}
+    data = js.get("data") or {}
+    if err.get("code") == 190 or (data and not data.get("is_valid", True)):
+        return False, err.get("message") or json.dumps(data)[:300]
+    exp = data.get("expires_at")
+    if exp:
+        days = (datetime.fromtimestamp(int(exp), tz=timezone.utc)
+                - datetime.now(timezone.utc)).days
+        log.info("Token OK — expires in ~%d day(s).", days)
+        if days <= 7:
+            log.warning("Token expires in %d day(s) — refresh_ig_token.yml "
+                        "should renew it; check its last run.", days)
+    return True, ""
+
+
+def _alert_token_dead(reason: str) -> None:
+    """Email: the token is dead, NOTHING will publish until it's replaced."""
+    try:
+        from publisher.notify_email import send  # late import
+        send(
+            "[GenZ ALERT] Instagram token EXPIRED — auto-publish is STOPPED",
+            "The 3am MYT auto-publish run aborted before touching any row.\n\n"
+            f"Reason: {reason}\n\n"
+            "Approved rows are left as 'Publish' and will go out automatically "
+            "once the token is fixed. To fix: generate a new long-lived token "
+            "for app 'Gen Z publisher' (989601526736983), then update the "
+            "INSTAGRAM_ACCESS_TOKEN GitHub secret. See "
+            "publisher/workflows/publish_instagram_post.md -> 'Access token'.\n",
+        )
+        log.info("Token-expired alert email sent.")
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Could not send token alert email: %s", exc)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true",
@@ -230,6 +286,14 @@ def main() -> int:
     if not os.getenv("GOOGLE_SHEET_ID"):
         log.error("GOOGLE_SHEET_ID not set — abort.")
         return 1
+
+    alive, reason = _token_alive(access_token)
+    if not alive:
+        log.error("Instagram token is DEAD — aborting before touching any row: %s",
+                  reason)
+        if not args.dry_run:
+            _alert_token_dead(reason)
+        return 2
 
     from publisher.post_generator import SheetsReader  # late import: needs gspread
     reader = SheetsReader(_config())
