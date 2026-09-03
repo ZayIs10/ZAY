@@ -60,6 +60,22 @@ Verified 2026-07-04. When an automation changes shape, update THIS file.
 - **Format:** viral hook (clean) → single clip + tweet-card overlay → CTA
   end-card, LOCKED (multi-beat code in `publisher/beats.py`/`beat_media.py`
   exists but is unused)
+- **Motivation-speech variant (2026-09-03):** a row with `Post Type =
+  motivation` renders the @peakzmotivation format INSTEAD of the tweet card —
+  same entry script, same trigger/state machine/Drive/email, branch inside
+  `build_reel_for_row` → `_build_motivation_reel`. The speech clip fills the
+  whole 1080x1920 frame (cover-crop) with its own audio from t=0; word-by-word
+  Anton captions pop in sync, white + power words in neon #39FF14, over a
+  gradient scrim; NO viral hook (the speech IS the hook, and captions are
+  timed from t=0); CTA end-card kept. Word timing is FREE from the source's
+  YouTube captions: `publisher/media_sources/word_timing.py` (json3 per-word
+  primary, VTT even-split fallback; same proxy/cookie handling as
+  transcript_picker). Caption pages/PNG states + ffconcat:
+  `publisher/speech_captions.py`; compositing: `compositor.build_speech`
+  (single concat-demuxer caption input → one overlay). A clip with NO
+  fetchable captions → "Render Failed" telling the user to pick a caption-ed
+  clip. Motivation rows should always carry a hand-picked `YouTube URL`
+  (auto media-search is tuned for AI-news topics, not speeches).
 - **State machine:** `Ready to Run` → `Building` → `Ready to Post`
   (terminal skips: `Skipped - No Video`, `Render Failed`; PARKED:
   `Proxy Empty - Retry` = a download path was temporarily unusable, originally

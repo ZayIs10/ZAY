@@ -467,6 +467,12 @@ def build_reel_for_row(row: dict) -> Path:
     """
     row_index = row["_row_index"]
     topic = (row.get("Topic") or "").strip()
+    # Format switch: Post Type='motivation' renders the peakzmotivation-style
+    # speech reel (full-frame famous-speech footage + word-pop neon captions)
+    # instead of the tweet-card layout. Everything up to and including the
+    # video download is shared; the render branches below.
+    post_type = (row.get("Post Type") or "").strip().lower()
+    is_motivation = post_type == "motivation"
     # On-screen card text = Reel Caption (col 29): the words that sit ON the
     # reel video, no hashtags, explaining the update + how to use it. The Post
     # Caption (col 30) is the IG text-box caption with hashtags and must NOT be
@@ -486,9 +492,11 @@ def build_reel_for_row(row: dict) -> Path:
     missing = []
     if not topic:
         missing.append("Topic")
-    if not card_text:
+    if not card_text and not is_motivation:
         # Either column satisfies this — card_text already fell back to
         # Post Caption above, so an empty here means BOTH are blank.
+        # Motivation reels burn the TRANSCRIPT on screen, so they need no
+        # caption columns to render (Post Caption still self-fills for IG).
         missing.append("Reel Caption / Post Caption")
     if not video_url:
         missing.append("Media Video URL")
@@ -551,6 +559,12 @@ def build_reel_for_row(row: dict) -> Path:
     # succeeding is what matters, and the finder will refresh it next run.
     if used_url and used_url != video_url:
         video_url = used_url
+
+    if is_motivation:
+        # Speech format: no poster, no tweet card, no viral hook (the
+        # speech's own opening line IS the hook — a viralhooks clip in front
+        # would delay it, clash tonally, and break the t=0 caption sync).
+        return _build_motivation_reel(Path(source_video), video_url, slug)
 
     # Poster: use the row's image if present, else fall back to the video's
     # own thumbnail (always available for a YouTube clip) so a missing image
@@ -631,6 +645,76 @@ def build_reel_for_row(row: dict) -> Path:
         raise RuntimeError(f"Composite produced empty file: {out_mp4}")
 
     log.info("Reel built: %s (%.1f MB)", out_mp4, out_mp4.stat().st_size / 1e6)
+    return out_mp4
+
+
+def _build_motivation_reel(source_video: Path, video_url: str,
+                           slug: str) -> Path:
+    """Render the motivation-speech format (@peakzmotivation style): the
+    speech clip fills the whole frame, its own audio plays from t=0, and
+    word-by-word Anton captions pop in sync — white with the power words in
+    neon #39FF14 — over a soft gradient scrim. Closes with the standard
+    "comment SEND" CTA end-card.
+
+    Word timing comes free from the source's own YouTube captions
+    (media_sources/word_timing.py). A clip with NO fetchable captions cannot
+    be worded — that raises, routing the row to "Render Failed" with a
+    message telling the user to pick a clip with spoken audio/captions.
+    """
+    from publisher import speech_captions  # noqa: E402
+    from publisher.compositor import build_speech, probe_duration  # noqa: E402
+    from publisher.media_sources.word_timing import fetch_word_timings  # noqa: E402
+
+    words = fetch_word_timings(video_url)
+    if not words:
+        raise RuntimeError(
+            "Source video has no fetchable captions — the motivation format "
+            "needs word timing to burn the speech on screen. Pick a clip "
+            "with spoken audio (YouTube auto-captions enabled)."
+        )
+
+    # CTA first: its duration decides how much speech fits under the 60s cap,
+    # and the caption timeline must stop where the video will be trimmed.
+    cta_path = None
+    try:
+        from publisher.cta_endcard import endcard_for_reel  # noqa: E402
+        cta_path = endcard_for_reel(TMP_DIR)
+    except Exception as exc:  # noqa: BLE001 — CTA must never kill a build
+        log.warning("CTA end-card: unavailable (%s) — building without it.",
+                    exc)
+    cta_dur = probe_duration(cta_path) if cta_path else 0.0
+    src_dur = probe_duration(source_video)
+    body_max = min(60.0 - cta_dur, src_dur)
+
+    pages = speech_captions.paginate(words, body_max=body_max)
+    if not pages:
+        raise RuntimeError(
+            f"No caption words land inside the first {body_max:.0f}s of the "
+            "clip — the speech may start later in the video. Pick a pre-cut "
+            "speech clip that talks from the start."
+        )
+    n_words = sum(len(p) for p in pages)
+    log.info("Motivation reel: %d words on %d caption pages across %.1fs.",
+             n_words, len(pages), body_max)
+
+    work_dir = TMP_DIR / f"{slug}_speech"
+    ffconcat = speech_captions.render_caption_states(
+        pages, work_dir, body_max=body_max)
+    scrim = speech_captions.render_scrim(work_dir)
+
+    out_mp4 = RENDERS_DIR / f"{slug}-tweet.mp4"
+    log.info("Compositing motivation reel -> %s", out_mp4.name)
+    build_speech(
+        source_video, scrim, ffconcat, out_mp4,
+        band_y=speech_captions.BAND_Y,
+        max_seconds=60.0,
+        cta_endcard=cta_path,
+    )
+
+    if not out_mp4.exists() or out_mp4.stat().st_size == 0:
+        raise RuntimeError(f"Composite produced empty file: {out_mp4}")
+    log.info("Motivation reel built: %s (%.1f MB)",
+             out_mp4, out_mp4.stat().st_size / 1e6)
     return out_mp4
 
 

@@ -451,6 +451,111 @@ def _render_body(
     return out_path
 
 
+def build_speech(
+    source_video: Path,
+    scrim_png: Path,
+    captions_ffconcat: Path,
+    out_path: Path,
+    *,
+    band_y: int,
+    max_seconds: float = 60.0,
+    cta_endcard: Path | None = None,
+) -> Path:
+    """Composite a MOTIVATION-SPEECH reel: the source clip cover-cropped to
+    fill the whole 1080x1920 canvas (no card, no poster intro — the speech
+    starts at t=0), a static gradient scrim, and the word-pop caption stream
+    (a concat-demuxer slideshow of transparent PNGs from
+    publisher/speech_captions.py) overlaid at `band_y`. Keeps the speech's
+    own audio. Appends the CTA end-card exactly like build() does.
+
+    Caption timings are relative to the source's t=0, which is also reel
+    t=0 here — that alignment is the whole reason this format has no poster
+    intro segment.
+    """
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    cta_dur = probe_duration(cta_endcard) if cta_endcard else 0.0
+    if cta_endcard and max_seconds - cta_dur < _MIN_BODY_SECONDS:
+        log.warning(
+            "CTA end-card (%.1fs) leaves under %.0fs of the %.0fs cap — "
+            "dropping the CTA.", cta_dur, _MIN_BODY_SECONDS, max_seconds,
+        )
+        cta_endcard, cta_dur = None, 0.0
+
+    body_max = max_seconds - cta_dur
+    src_dur = probe_duration(source_video)
+    total_dur = min(src_dur, body_max)
+    keep_audio = has_audio(source_video)
+    log.info(
+        "Speech composite: body %.1fs (src %.1fs, cap %.1fs) + CTA %.1fs; "
+        "audio %s", total_dur, src_dur, body_max, cta_dur,
+        "kept" if keep_audio else "none -> silent track",
+    )
+
+    body_target = (out_path.with_name(out_path.stem + "_bodyseg.mp4")
+                   if cta_endcard else out_path)
+
+    video_graph = (
+        # [0] source clip, [1] scrim PNG (looped), [2] caption slideshow.
+        f"[0:v]{_COVER_FILTER},fps=30,trim=duration={total_dur:.2f},"
+        f"setpts=PTS-STARTPTS[base];"
+        f"[1:v]format=rgba[scrim];"
+        f"[base][scrim]overlay=0:0:format=auto:shortest=1[lit];"
+        f"[2:v]fps=30,format=rgba[cap];"
+        # eof_action=pass: when the caption stream ends (it closes with a
+        # blank), the footage keeps playing untouched.
+        f"[lit][cap]overlay=0:{band_y}:format=auto:eof_action=pass[v]"
+    )
+
+    cmd = [
+        _resolve_ffmpeg(), "-y", "-loglevel", "warning",
+        "-i", str(source_video),
+        "-loop", "1", "-i", str(scrim_png),
+        "-f", "concat", "-safe", "0", "-i", str(captions_ffconcat),
+    ]
+    if keep_audio:
+        cmd += [
+            "-filter_complex",
+            video_graph
+            + f";[0:a]atrim=duration={total_dur:.2f},asetpts=PTS-STARTPTS[a]",
+            "-map", "[v]", "-map", "[a]",
+        ]
+    else:
+        # Input 3: silence — every segment must carry an audio track so the
+        # CTA concat can't desync (house rule; a silent speech reel would be
+        # a broken source anyway, but never desync over it).
+        cmd += [
+            "-f", "lavfi", "-t", f"{total_dur:.2f}",
+            "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+            "-filter_complex", video_graph,
+            "-map", "[v]", "-map", "3:a",
+        ]
+
+    cmd += [
+        "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+        "-pix_fmt", "yuv420p",
+        "-r", "30", "-g", "30", "-keyint_min", "30",
+        "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2",
+        "-movflags", "+faststart",
+        "-t", f"{total_dur:.2f}",
+        str(body_target),
+    ]
+
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        log.error("ffmpeg stderr:\n%s", proc.stderr)
+        raise RuntimeError(f"speech composite failed (exit {proc.returncode})")
+
+    if cta_endcard:
+        # CTA is pre-normalized to this exact recipe -> clean stream copy.
+        _concat_copy([body_target, cta_endcard], out_path)
+        try:
+            body_target.unlink()
+        except OSError:
+            pass
+    return out_path
+
+
 def _build_beat_segment(
     card_png: Path,
     clip: Path,

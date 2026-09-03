@@ -268,6 +268,10 @@ def _is_bot_block(exc: Exception) -> bool:
         or "sign in to confirm" in msg
         or "requested format is not available" in msg  # client saw no real fmt
         or "unable to extract" in msg
+        # 2026-09: YouTube's newer challenge response on the tv client.
+        # Another client (ios/android) usually serves the same video fine, so
+        # this must rotate, not abort the whole chain on attempt #1.
+        or "page needs to be reloaded" in msg
     )
 
 
