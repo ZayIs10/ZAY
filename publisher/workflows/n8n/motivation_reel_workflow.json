@@ -1,0 +1,169 @@
+{
+  "__readme": [
+    "Gen Z Motivation - Speech Reel Builder (Workflow M).",
+    "Live copy: n8n workflow id 5PDeSqZjx1fS0sQ6 (created 2026-09-04 via MCP).",
+    "Watches the 'Motivation' tab (speech reels live on their own tab; the",
+    "Reels tab stays for AI content). Gate = Published contains 'Ready to Run'",
+    "+ Topic non-empty — NO Post Type check, because everything on this tab is",
+    "a motivation reel (the Python build also defaults Post Type=motivation",
+    "for Motivation-tab rows). Claims by flipping Published -> 'Building',",
+    "then fires the SAME build-tweet-card-reel repository_dispatch as",
+    "Workflow B; the Python build resolves the topic on the Reels tab first,",
+    "then the Motivation tab.",
+    "This committed copy is the reference if the live workflow drifts",
+    "(see the 2026-08-02 gate-drift lesson)."
+  ],
+  "name": "Gen Z Motivation - Speech Reel Builder (Workflow M)",
+  "settings": { "executionOrder": "v1", "timezone": "Asia/Singapore" },
+  "nodes": [
+    {
+      "id": "m-trigger",
+      "name": "Sheets Trigger - Motivation Row Updated",
+      "type": "n8n-nodes-base.googleSheetsTrigger",
+      "typeVersion": 1,
+      "position": [-144, 96],
+      "retryOnFail": true,
+      "parameters": {
+        "pollTimes": { "item": [{ "mode": "everyMinute" }] },
+        "documentId": {
+          "__rl": true,
+          "value": "13AEU80ULx2Lxnq9SWDeSSFN7unfhr-x_mPyi37oz7O4",
+          "mode": "list",
+          "cachedResultName": "Gen Z Research",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13AEU80ULx2Lxnq9SWDeSSFN7unfhr-x_mPyi37oz7O4/edit?usp=drivesdk"
+        },
+        "sheetName": { "__rl": true, "value": "Motivation", "mode": "name", "cachedResultName": "Motivation" },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsTriggerOAuth2Api": { "id": "IxSD6Neq0BeEa9Jd", "name": "Google Sheets Trigger account 4" }
+      }
+    },
+    {
+      "id": "m-gate",
+      "name": "IF - Ready to Run",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [96, 96],
+      "retryOnFail": true,
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 1 },
+          "conditions": [
+            {
+              "id": "m-cond-ready",
+              "leftValue": "={{ $json.Published }}",
+              "rightValue": "Ready to Run",
+              "operator": { "type": "string", "operation": "contains" }
+            },
+            {
+              "id": "m-cond-topic",
+              "leftValue": "={{ $json.Topic }}",
+              "operator": { "type": "string", "operation": "notEmpty", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "m-set",
+      "name": "Set - Extract Row Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [336, 96],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "m-a0", "name": "row_number", "value": "={{ $json.row_number || $json.__row || $itemIndex + 2 }}", "type": "number" },
+            { "id": "m-a1", "name": "topic", "value": "={{ ($json['Topic'] || '').toString().trim() }}", "type": "string" }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "m-claim",
+      "name": "Sheets - Claim (Building)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [576, 96],
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "13AEU80ULx2Lxnq9SWDeSSFN7unfhr-x_mPyi37oz7O4",
+          "mode": "list",
+          "cachedResultName": "Gen Z Research",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13AEU80ULx2Lxnq9SWDeSSFN7unfhr-x_mPyi37oz7O4/edit?usp=drivesdk"
+        },
+        "sheetName": { "__rl": true, "value": "Motivation", "mode": "name", "cachedResultName": "Motivation" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": { "row_number": "={{ $json.row_number }}", "Published": "Building" },
+          "matchingColumns": ["row_number"],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "AKkpUn5IypddfmfE", "name": "Google Sheets account 9" }
+      }
+    },
+    {
+      "id": "m-dispatch",
+      "name": "HTTP - Trigger Render Worker",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [816, 96],
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.github.com/repos/ZayIs10/ZAY/dispatches",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Accept", "value": "application/vnd.github+json" },
+            { "name": "X-GitHub-Api-Version", "value": "2022-11-28" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"event_type\": \"build-tweet-card-reel\",\n  \"client_payload\": {\n    \"topic\": \"{{ $('IF - Ready to Run').item.json.Topic }}\"\n  }\n}\n",
+        "options": {}
+      },
+      "credentials": {
+        "githubApi": { "id": "UHXtn1G7d8EMqfMh", "name": "GitHub account 2" }
+      }
+    },
+    {
+      "id": "m-fail-mail",
+      "name": "Gmail - Notify Dispatch Failed",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1056, 240],
+      "parameters": {
+        "sendTo": "guanyitan99@gmail.com",
+        "subject": "=Motivation reel dispatch FAILED — {{ $('IF - Ready to Run').item.json.Topic }}",
+        "emailType": "text",
+        "message": "=The GitHub dispatch failed for Motivation-tab topic: {{ $('IF - Ready to Run').item.json.Topic }}. Check Workflow M's execution log in n8n. The row is left on 'Building' — set it back to 'Ready to Run' to retry.",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": { "id": "Wx9U0wyKwyNtqtEu", "name": "Gmail account 3" }
+      }
+    }
+  ],
+  "connections": {
+    "Sheets Trigger - Motivation Row Updated": { "main": [[{ "node": "IF - Ready to Run", "type": "main", "index": 0 }]] },
+    "IF - Ready to Run": { "main": [[{ "node": "Set - Extract Row Fields", "type": "main", "index": 0 }]] },
+    "Set - Extract Row Fields": { "main": [[{ "node": "Sheets - Claim (Building)", "type": "main", "index": 0 }]] },
+    "Sheets - Claim (Building)": { "main": [[{ "node": "HTTP - Trigger Render Worker", "type": "main", "index": 0 }]] },
+    "HTTP - Trigger Render Worker": { "main": [[], [{ "node": "Gmail - Notify Dispatch Failed", "type": "main", "index": 0 }]] }
+  }
+}

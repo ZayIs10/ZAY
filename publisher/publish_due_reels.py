@@ -94,6 +94,17 @@ def _config() -> dict:
     }
 
 
+def _motivation_config() -> dict | None:
+    """Same spreadsheet, the Motivation tab — speech reels live on their own
+    tab since 2026-09-04. None when the tab name is explicitly blanked."""
+    name = os.getenv("GOOGLE_SHEET_MOTIVATION_NAME", "Motivation").strip()
+    if not name:
+        return None
+    cfg = _config()
+    cfg["google_sheets"]["sheet_name"] = name
+    return cfg
+
+
 def _find_due_rows(ws) -> list[dict]:
     """Return every row the user approved: 'Publish' (trimmed, case-insensitive)
     in the live Status column OR the visible legacy col F, with a usable
@@ -296,10 +307,25 @@ def main() -> int:
         return 2
 
     from publisher.post_generator import SheetsReader  # late import: needs gspread
-    reader = SheetsReader(_config())
-    ws = reader.ws
 
-    due = _find_due_rows(ws)
+    # Approved reels can live on TWO tabs since 2026-09-04: the AI-content
+    # Reels tab and the Motivation speech tab. Scan both (Reels first — sheet
+    # order stays queue order per tab); the combined queue still honors
+    # --limit, so the default is ONE post per day across both tabs.
+    due: list[tuple] = []
+    for cfg, required in ((_config(), True), (_motivation_config(), False)):
+        if cfg is None:
+            continue
+        try:
+            ws = SheetsReader(cfg).ws
+        except Exception as exc:  # noqa: BLE001 — Motivation tab may not exist
+            if required:
+                raise
+            log.info("Tab %r not readable (%s) — skipping it.",
+                     cfg["google_sheets"]["sheet_name"], exc)
+            continue
+        due += [(ws, row) for row in _find_due_rows(ws)]
+
     if not due:
         log.info("No approved reels (no row says 'Publish'). Nothing to post.")
         return 0
@@ -311,7 +337,7 @@ def main() -> int:
     log.info("%d reel(s) due for publishing.", len(due))
     ok = 0
     failed: list[str] = []
-    for row in due:
+    for ws, row in due:
         if publish_one(ws, row, ig_user_id, access_token, dry_run=args.dry_run):
             ok += 1
         else:

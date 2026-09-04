@@ -41,7 +41,7 @@ from dotenv import load_dotenv  # noqa: E402
 
 from publisher.post_generator import SheetsReader  # noqa: E402
 from publisher.tweet_card_reel import (  # noqa: E402
-    PROXY_EMPTY_STATUS, _sheets_config,
+    PROXY_EMPTY_STATUS, _sheets_config, _motivation_sheets_config,
 )
 
 logging.basicConfig(
@@ -110,6 +110,15 @@ def main() -> int:
 
     reader = SheetsReader(_sheets_config())
     parked = _parked_topics(reader)
+    # Speech reels live on the Motivation tab (2026-09-04) — sweep it too.
+    # The rebuild below goes by --topic, and the build itself resolves which
+    # tab the topic lives on, so only the COLLECTION needs to know both tabs.
+    m_cfg = _motivation_sheets_config()
+    if m_cfg is not None:
+        try:
+            parked += _parked_topics(SheetsReader(m_cfg))
+        except Exception as exc:  # noqa: BLE001 — tab may not exist yet
+            log.debug("Motivation tab not swept: %s", exc)
     if not parked:
         log.info("No rows at Status=%r. Nothing to do.", PROXY_EMPTY_STATUS)
         return 0

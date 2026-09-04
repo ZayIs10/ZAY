@@ -122,6 +122,32 @@ def _sheets_config() -> dict:
     }
 
 
+def _motivation_sheets_config() -> dict | None:
+    """Config for the Motivation tab. Since 2026-09-04 speech reels live on
+    their own tab (same spreadsheet, same columns) so the user's motivation
+    library doesn't mix with the AI-content Reels tab. Returns None when the
+    tab name is explicitly blanked (single-tab installs)."""
+    name = os.getenv("GOOGLE_SHEET_MOTIVATION_NAME", "Motivation").strip()
+    if not name:
+        return None
+    cfg = _sheets_config()
+    cfg["google_sheets"]["sheet_name"] = name
+    return cfg
+
+
+def _open_motivation_reader() -> "SheetsReader | None":
+    """SheetsReader bound to the Motivation tab, or None when the tab doesn't
+    exist (yet) — the caller then simply stays on the Reels tab."""
+    cfg = _motivation_sheets_config()
+    if cfg is None:
+        return None
+    try:
+        return SheetsReader(cfg)
+    except Exception as exc:  # noqa: BLE001 — missing tab is a soft miss
+        log.debug("Motivation tab unavailable: %s", exc)
+        return None
+
+
 def _read_row_by_index(reader: SheetsReader, row_index: int) -> dict:
     """Read a single row by 1-indexed sheet row number."""
     all_values = reader.ws.get_all_values()
@@ -722,19 +748,46 @@ def run(row_index: int | None, *, topic: str | None = None, dry_run: bool,
         force: bool = False) -> int:
     config = _sheets_config()
     reader = SheetsReader(config)
+    on_motivation_tab = False
 
     if topic is not None:
         # Preferred path: address the row by its unambiguous Topic string.
-        row = _find_row_by_topic(reader, topic)
+        # A topic that isn't on the Reels tab may live on the Motivation tab
+        # (speech reels moved to their own tab 2026-09-04) — the reader is
+        # rebound so every later status/caption write lands on the right tab.
+        try:
+            row = _find_row_by_topic(reader, topic)
+        except RuntimeError as exc:
+            if "No row found with Topic" not in str(exc):
+                raise  # ambiguous topic etc. — a real error, don't mask it
+            m_reader = _open_motivation_reader()
+            if m_reader is None:
+                raise
+            log.info("Topic not on the Reels tab — trying the Motivation tab.")
+            row = _find_row_by_topic(m_reader, topic)
+            reader = m_reader
+            on_motivation_tab = True
         row_index = row["_row_index"]
     elif row_index is None:
         row = _find_ready_to_run_row(reader)
+        if row is None:
+            m_reader = _open_motivation_reader()
+            if m_reader is not None:
+                row = _find_ready_to_run_row(m_reader)
+                if row is not None:
+                    reader = m_reader
+                    on_motivation_tab = True
         if row is None:
             log.info("No row with Status='Ready to Run' (+Topic). Nothing to do.")
             return 0
         row_index = row["_row_index"]
     else:
         row = _read_row_by_index(reader, row_index)
+
+    if on_motivation_tab and not (row.get("Post Type") or "").strip():
+        # Every row on the Motivation tab IS a motivation reel — don't make
+        # the user remember to type the Post Type by hand.
+        row["Post Type"] = "motivation"
 
     log.info("Processing row %d: %r", row_index, row.get("Topic", "(no topic)"))
 

@@ -76,6 +76,25 @@ Verified 2026-07-04. When an automation changes shape, update THIS file.
   fetchable captions → "Render Failed" telling the user to pick a caption-ed
   clip. Motivation rows should always carry a hand-picked `YouTube URL`
   (auto media-search is tuned for AI-news topics, not speeches).
+- **Motivation tab (2026-09-04):** motivation rows live on their OWN sheet
+  tab `Motivation` (same spreadsheet, header row copied 1:1 from Reels; env
+  override `GOOGLE_SHEET_MOTIVATION_NAME`) so the speech library doesn't mix
+  with AI content. Wiring: n8n **Workflow M** (`Gen Z Motivation - Speech
+  Reel Builder`, id `5PDeSqZjx1fS0sQ6`, committed copy
+  `publisher/workflows/n8n/motivation_reel_workflow.json`) polls the tab
+  every minute — gate = `Published` contains "Ready to Run" + Topic, NO Post
+  Type check — claims `Published='Building'` and fires the same
+  `build-tweet-card-reel` dispatch. `tweet_card_reel.run()` resolves a topic
+  on the Reels tab FIRST, then falls back to the Motivation tab
+  (`_open_motivation_reader`), rebinding `reader` so all writes land on the
+  right tab; rows from the Motivation tab default `Post Type=motivation`
+  when the cell is blank. `publish_due_reels` scans BOTH tabs (still ONE
+  post/day total); `proxy_recovery` sweeps both tabs for parked rows. The
+  tab was seeded 2026-09-04 with 9 caption-verified example speeches
+  (podcast/movie/classic lanes). NOTE: the live Workflow B gate has drifted
+  AGAIN — it now requires `Post Type == "reel"` exactly (committed JSON says
+  only-reject-carousel), which is another reason motivation rows must NOT
+  sit on the Reels tab.
 - **State machine:** `Ready to Run` → `Building` → `Ready to Post`
   (terminal skips: `Skipped - No Video`, `Render Failed`; PARKED:
   `Proxy Empty - Retry` = a download path was temporarily unusable, originally
