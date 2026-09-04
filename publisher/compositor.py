@@ -114,6 +114,24 @@ def probe_duration(path: Path) -> float:
     return dur
 
 
+def probe_dimensions(path: Path) -> tuple[int, int]:
+    """(width, height) of the first video stream, or (0, 0) if unknowable."""
+    probe = _resolve_ffprobe()
+    cmd = [
+        probe, "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=width,height",
+        "-of", "json", str(path),
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        data = json.loads(proc.stdout or "{}")
+        stream = (data.get("streams") or [{}])[0]
+        return int(stream.get("width", 0)), int(stream.get("height", 0))
+    except Exception:  # noqa: BLE001 — caller falls back to cover-crop
+        return 0, 0
+
+
 def _has_audio_via_ffmpeg(path: Path) -> bool:
     """Fallback audio-stream detection: look for an 'Audio:' stream line in
     `ffmpeg -i` stderr (used when ffprobe isn't installed)."""
@@ -151,6 +169,17 @@ def has_audio(path: Path) -> bool:
 _COVER_FILTER = (
     f"scale={CANVAS_W}:{CANVAS_H}:force_original_aspect_ratio=increase,"
     f"crop={CANVAS_W}:{CANVAS_H},setsar=1"
+)
+
+# Cinematic grade for motivation-speech reels (user, 2026-09-04): the look
+# the big motivation pages run — teal-pushed shadows, slightly warm
+# highlights, raised contrast, pulled-back saturation, a soft vignette and
+# light film grain. Free ffmpeg filters, no LUT files.
+_CINE_GRADE = (
+    "eq=contrast=1.12:saturation=0.85,"
+    "colorbalance=rs=-0.05:gs=0.02:bs=0.10:rh=0.04:bh=-0.04,"
+    "vignette=angle=PI/5,"
+    "noise=alls=5:allf=t"
 )
 
 # A hook that leaves less than this for the body is skipped — the reel's
@@ -461,12 +490,15 @@ def build_speech(
     max_seconds: float = 60.0,
     cta_endcard: Path | None = None,
 ) -> Path:
-    """Composite a MOTIVATION-SPEECH reel: the source clip cover-cropped to
-    fill the whole 1080x1920 canvas (no card, no poster intro — the speech
-    starts at t=0), a static gradient scrim, and the word-pop caption stream
-    (a concat-demuxer slideshow of transparent PNGs from
-    publisher/speech_captions.py) overlaid at `band_y`. Keeps the speech's
-    own audio. Appends the CTA end-card exactly like build() does.
+    """Composite a MOTIVATION-SPEECH reel: the source clip at its ORIGINAL
+    aspect ratio (user, 2026-09-04 — cover-cropping hid the speaker's face)
+    scaled to full width and placed above the caption band, over a blurred +
+    darkened cover-crop of itself filling the rest of the canvas; the whole
+    frame gets the _CINE_GRADE cinematic look. Then the static gradient
+    scrim and the word-pop caption stream (a concat-demuxer slideshow of
+    transparent PNGs from publisher/speech_captions.py) overlaid at
+    `band_y`. Keeps the speech's own audio. A near-vertical source already
+    IS the original framing full-screen, so it cover-crops as before.
 
     Caption timings are relative to the source's t=0, which is also reel
     t=0 here — that alignment is the whole reason this format has no poster
@@ -495,9 +527,33 @@ def build_speech(
     body_target = (out_path.with_name(out_path.stem + "_bodyseg.mp4")
                    if cta_endcard else out_path)
 
+    # Original-framing layout: scale the clip to full width, keep its aspect
+    # ratio, and sit it just above the caption band (or vertically centered,
+    # whichever is lower on the canvas) over a blurred darkened cover-crop.
+    src_w, src_h = probe_dimensions(source_video)
+    fg_h = int(round(CANVAS_W * src_h / src_w / 2) * 2) if src_w else 0
+    if 0 < fg_h < CANVAS_H - 120:
+        if fg_h <= band_y - 72:  # fits above the captions with margin
+            fg_y = min((CANVAS_H - fg_h) // 2, band_y - fg_h - 12)
+        else:                    # too tall — center it, captions overlay it
+            fg_y = (CANVAS_H - fg_h) // 2
+        log.info("Original framing: %dx%d source -> %dx%d at y=%d.",
+                 src_w, src_h, CANVAS_W, fg_h, fg_y)
+        frame_chain = (
+            f"[0:v]split=2[bgsrc][fgsrc];"
+            f"[bgsrc]{_COVER_FILTER},boxblur=32:2,eq=brightness=-0.22[bg];"
+            f"[fgsrc]scale={CANVAS_W}:-2,setsar=1[fgs];"
+            f"[bg][fgs]overlay=0:{fg_y}[comp];"
+        )
+    else:
+        # Unknown dimensions or an (almost) vertical source: full-frame
+        # cover-crop IS the original framing here.
+        frame_chain = f"[0:v]{_COVER_FILTER}[comp];"
+
     video_graph = (
         # [0] source clip, [1] scrim PNG (looped), [2] caption slideshow.
-        f"[0:v]{_COVER_FILTER},fps=30,trim=duration={total_dur:.2f},"
+        frame_chain
+        + f"[comp]{_CINE_GRADE},fps=30,trim=duration={total_dur:.2f},"
         f"setpts=PTS-STARTPTS[base];"
         f"[1:v]format=rgba[scrim];"
         f"[base][scrim]overlay=0:0:format=auto:shortest=1[lit];"

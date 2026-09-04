@@ -469,8 +469,14 @@ def _ensure_captions(reader: SheetsReader, row_index: int, row: dict,
     log.info("Captions missing on row %d — generating (free)%s...",
              row_index, " with transcript" if transcript else "")
 
-    from publisher.caption_builder import build_captions
-    caps = build_captions(topic, key_points, transcript)
+    from publisher.caption_builder import (build_captions,
+                                           build_motivation_captions)
+    if (row.get("Post Type") or "").strip().lower() == "motivation":
+        # Motivation channel voice: no comment-"Send" DM hook, no AI talk
+        # (user, 2026-09-04).
+        caps = build_motivation_captions(topic, key_points, transcript)
+    else:
+        caps = build_captions(topic, key_points, transcript)
 
     # Only fill the columns that were actually blank.
     if not reel_cap:
@@ -699,24 +705,17 @@ def _build_motivation_reel(source_video: Path, video_url: str,
             "with spoken audio (YouTube auto-captions enabled)."
         )
 
-    # CTA first: its duration decides how much speech fits under the length
-    # cap, and the caption timeline must stop where the video will be trimmed.
-    cta_path = None
-    try:
-        from publisher.cta_endcard import endcard_for_reel  # noqa: E402
-        cta_path = endcard_for_reel(TMP_DIR)
-    except Exception as exc:  # noqa: BLE001 — CTA must never kill a build
-        log.warning("CTA end-card: unavailable (%s) — building without it.",
-                    exc)
-    cta_dur = probe_duration(cta_path) if cta_path else 0.0
+    # NO comment-SEND end-card here (user, 2026-09-04): that CTA belongs to
+    # the GenZ Capital AI content, not the motivation channel — the reel
+    # simply ends when the speech does.
     src_dur = probe_duration(source_video)
     # Length is word-driven (user, 2026-09-04): end the body on the latest
     # finished thought — sentence end or a real pause — that fits under the
     # 1:40 total ceiling, instead of chopping mid-sentence at a fixed mark.
-    ceiling = min(speech_captions.REEL_MAX_SECONDS - cta_dur, src_dur)
+    ceiling = min(speech_captions.REEL_MAX_SECONDS, src_dur)
     body_max, kept_words = speech_captions.natural_cut(words, ceiling)
-    log.info("Speech cut: body ends at %.1fs (ceiling %.1fs, source %.1fs, "
-             "CTA %.1fs).", body_max, ceiling, src_dur, cta_dur)
+    log.info("Speech cut: body ends at %.1fs (ceiling %.1fs, source %.1fs).",
+             body_max, ceiling, src_dur)
 
     pages = speech_captions.paginate(kept_words, body_max=body_max)
     if not pages:
@@ -739,8 +738,8 @@ def _build_motivation_reel(source_video: Path, video_url: str,
     build_speech(
         source_video, scrim, ffconcat, out_mp4,
         band_y=speech_captions.BAND_Y,
-        max_seconds=body_max + cta_dur,
-        cta_endcard=cta_path,
+        max_seconds=body_max,
+        cta_endcard=None,
     )
 
     if not out_mp4.exists() or out_mp4.stat().st_size == 0:

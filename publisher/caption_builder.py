@@ -207,3 +207,117 @@ def build_captions(topic: str, key_points: str = "",
         "reel_caption": build_reel_caption(topic, key_points, transcript),
         "post_caption": build_post_caption(topic, key_points, transcript),
     }
+
+
+# ---------------------------------------------------------------------------
+# Motivation-channel captions (user, 2026-09-04): the comment-"Send" DM hook
+# and the AI-tool voice belong to the GenZ Capital AI content ONLY. Motivation
+# reels get their own voice — a quote from the speech, no DM loop, motivation
+# hashtags.
+# ---------------------------------------------------------------------------
+
+MOTIVATION_FOLLOW_CTA = (
+    "Follow @genzcapital for daily motivation that actually hits."
+)
+MOTIVATION_TAGS = "#motivation #mindset #discipline #success #dailymotivation"
+
+
+def _tidy_spoken(s: str) -> str:
+    """Clean a transcript sentence for print: collapse spoken stutters
+    ("he would he would" -> "he would") and capitalize the first letter."""
+    s = re.sub(r"\b(\w+)(?: \1\b)+", r"\1", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\w+ \w+)(?: \1\b)+", r"\1", s, flags=re.IGNORECASE)
+    s = s.strip()
+    return (s[:1].upper() + s[1:]) if s else s
+
+
+def _power_words() -> frozenset:
+    try:
+        from publisher.speech_captions import POWER_WORDS
+        return POWER_WORDS
+    except Exception:  # noqa: BLE001 — scoring is a bonus, not a dependency
+        return frozenset()
+
+
+def _continuation_words() -> frozenset:
+    try:
+        from publisher.speech_captions import _CONTINUATION_WORDS
+        return _CONTINUATION_WORDS
+    except Exception:  # noqa: BLE001
+        return frozenset()
+
+
+def _best_quote(spoken: list[str]) -> str:
+    """The most charged printable line: quote-length sentences ranked by how
+    many motivation power words they carry (speech_captions.POWER_WORDS —
+    same list that picks the neon caption words), first-wins on ties."""
+    power = _power_words()
+    best, best_score = "", -1
+    for s in spoken:
+        if not 30 <= len(s) <= 140:
+            continue
+        toks = re.findall(r"[a-z']+", s.lower())
+        score = sum(t in power for t in toks)
+        if score > best_score:
+            best, best_score = s, score
+    return best
+
+
+def _quote_from_flat(text: str) -> str:
+    """Quote picker for UNPUNCTUATED auto-caption transcripts (one giant
+    "sentence"): slide 10/14-word windows, keep the one densest in power
+    words, then trim dangling continuation words off both edges so the quote
+    starts and ends on words that can carry a thought."""
+    power, cont = _power_words(), _continuation_words()
+    toks = _clean(text).split()
+    if len(toks) < 8:
+        return ""
+
+    def norm(w: str) -> str:
+        return re.sub(r"[^a-z0-9]", "", w.lower())
+
+    best_i, best_len, best_score = 0, min(14, len(toks)), -1
+    for i in range(len(toks) - 7):
+        for length in (10, 14):
+            if i + length > len(toks):
+                continue
+            score = sum(norm(w) in power for w in toks[i:i + length])
+            if score > best_score:
+                best_i, best_len, best_score = i, length, score
+    win = toks[best_i:best_i + best_len]
+    for _ in range(3):
+        if win and norm(win[0]) in cont:
+            win.pop(0)
+    for _ in range(3):
+        if win and norm(win[-1]) in cont:
+            win.pop()
+    return " ".join(win)
+
+
+def build_motivation_captions(topic: str, key_points: str = "",
+                              transcript: str = "") -> dict:
+    """Post + reel captions for a motivation-speech reel.
+
+    Structure: quote hook (a real line from the speech when captions give us
+    one) -> the speech name -> a rewatch line -> follow CTA + constant
+    motivation tags. Deterministic and free, like build_captions."""
+    topic = _clean(topic)
+
+    spoken = [s for s in _first_sentences(transcript, 14) if len(s) > 30]
+    if len(spoken) >= 3:
+        quote = _best_quote(spoken)
+    else:
+        # Auto-captions often carry no punctuation — one giant "sentence".
+        quote = _quote_from_flat(transcript)
+    quote = _tidy_spoken(quote).rstrip(".!?").rstrip(" ,;:")
+    hook = f'"{quote}."' if quote else "Save this for the day you need it."
+
+    parts = [hook, topic.rstrip(".") + "."]
+    parts.append("Watch this again on the days you feel like quitting.")
+    parts.append(f"{MOTIVATION_FOLLOW_CTA}\n{MOTIVATION_TAGS}")
+    post = "\n\n".join(parts)
+
+    reel = topic.rstrip(".") + "."
+    if quote:
+        reel += f"\n{hook}"
+    return {"reel_caption": reel, "post_caption": post}

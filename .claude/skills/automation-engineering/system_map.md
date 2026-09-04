@@ -84,6 +84,19 @@ Verified 2026-07-04. When an automation changes shape, update THIS file.
   ~5s CTA = max 1:40). Only the last 30s below the ceiling is searched for a
   clean cut; fallbacks: last full word, then the raw ceiling. Speech shorter
   than the ceiling → reel ends when the talking stops.
+  **Three user changes 2026-09-04 (second round):** NO comment-SEND CTA
+  end-card on motivation reels (that CTA is AI-content-only — the reel just
+  ends with the speech); ORIGINAL framing instead of cover-crop
+  (`build_speech` scales the clip to full width at its own aspect ratio,
+  sits it above the caption band over a blurred darkened cover-crop of
+  itself; near-vertical sources still cover-crop) — cover-crop was hiding
+  the speaker's face; and a cinematic grade `compositor._CINE_GRADE` (teal
+  shadows, warm highlights, contrast up, saturation down, vignette, light
+  grain — the standard motivation-page look). Motivation rows also get their
+  OWN caption voice: `caption_builder.build_motivation_captions` (quote from
+  the speech via power-word scoring — flat unpunctuated auto-caption
+  transcripts use a sliding-window picker — no "Comment Send" hook, no AI
+  talk, #motivation tags); `_ensure_captions` branches on Post Type.
 - **Motivation tab (2026-09-04):** motivation rows live on their OWN sheet
   tab `Motivation` (same spreadsheet, header row copied 1:1 from Reels; env
   override `GOOGLE_SHEET_MOTIVATION_NAME`) so the speech library doesn't mix
