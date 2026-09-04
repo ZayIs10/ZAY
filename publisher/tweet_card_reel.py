@@ -699,8 +699,8 @@ def _build_motivation_reel(source_video: Path, video_url: str,
             "with spoken audio (YouTube auto-captions enabled)."
         )
 
-    # CTA first: its duration decides how much speech fits under the 60s cap,
-    # and the caption timeline must stop where the video will be trimmed.
+    # CTA first: its duration decides how much speech fits under the length
+    # cap, and the caption timeline must stop where the video will be trimmed.
     cta_path = None
     try:
         from publisher.cta_endcard import endcard_for_reel  # noqa: E402
@@ -710,9 +710,15 @@ def _build_motivation_reel(source_video: Path, video_url: str,
                     exc)
     cta_dur = probe_duration(cta_path) if cta_path else 0.0
     src_dur = probe_duration(source_video)
-    body_max = min(60.0 - cta_dur, src_dur)
+    # Length is word-driven (user, 2026-09-04): end the body on the latest
+    # finished thought — sentence end or a real pause — that fits under the
+    # 1:40 total ceiling, instead of chopping mid-sentence at a fixed mark.
+    ceiling = min(speech_captions.REEL_MAX_SECONDS - cta_dur, src_dur)
+    body_max, kept_words = speech_captions.natural_cut(words, ceiling)
+    log.info("Speech cut: body ends at %.1fs (ceiling %.1fs, source %.1fs, "
+             "CTA %.1fs).", body_max, ceiling, src_dur, cta_dur)
 
-    pages = speech_captions.paginate(words, body_max=body_max)
+    pages = speech_captions.paginate(kept_words, body_max=body_max)
     if not pages:
         raise RuntimeError(
             f"No caption words land inside the first {body_max:.0f}s of the "
@@ -733,7 +739,7 @@ def _build_motivation_reel(source_video: Path, video_url: str,
     build_speech(
         source_video, scrim, ffconcat, out_mp4,
         band_y=speech_captions.BAND_Y,
-        max_seconds=60.0,
+        max_seconds=body_max + cta_dur,
         cta_endcard=cta_path,
     )
 

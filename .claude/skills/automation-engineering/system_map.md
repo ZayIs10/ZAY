@@ -76,6 +76,14 @@ Verified 2026-07-04. When an automation changes shape, update THIS file.
   fetchable captions → "Render Failed" telling the user to pick a caption-ed
   clip. Motivation rows should always carry a hand-picked `YouTube URL`
   (auto media-search is tuned for AI-news topics, not speeches).
+  **Length is word-driven (2026-09-04, user request):**
+  `speech_captions.natural_cut()` ends the body on the latest FINISHED
+  thought — sentence punctuation or a >=0.6s pause, backed off past dangling
+  continuation words (real trap: Jocko pauses 3s mid-phrase after "don't
+  get…") — under `speech_captions.REEL_MAX_SECONDS = 100.0` total (body +
+  ~5s CTA = max 1:40). Only the last 30s below the ceiling is searched for a
+  clean cut; fallbacks: last full word, then the raw ceiling. Speech shorter
+  than the ceiling → reel ends when the talking stops.
 - **Motivation tab (2026-09-04):** motivation rows live on their OWN sheet
   tab `Motivation` (same spreadsheet, header row copied 1:1 from Reels; env
   override `GOOGLE_SHEET_MOTIVATION_NAME`) so the speech library doesn't mix

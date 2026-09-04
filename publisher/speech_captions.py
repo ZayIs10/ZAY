@@ -52,6 +52,12 @@ PAUSE_BREAK_SECONDS = 0.6           # a silence this long starts a fresh page
 _PAGE_HOLD_SECONDS = 0.35           # completed page lingers before a blank gap
 _SENTENCE_END_RE = re.compile(r"[.!?]$")
 
+# Reel length: user raised the cap 2026-09-04 — cut where the WORDS end, up
+# to 1:40 TOTAL (including the ~5s CTA end-card), instead of a hard 55s chop.
+REEL_MAX_SECONDS = 100.0
+_CUT_SEARCH_WINDOW = 30.0   # how far below the ceiling a clean cut may land
+_CUT_TAIL_HOLD = 0.5        # breathing room after the final spoken word
+
 POWER_WORDS = frozenset({
     "never", "nothing", "nobody", "impossible", "possible", "success",
     "succeed", "fail", "failure", "failed", "fear", "afraid", "dream",
@@ -123,6 +129,85 @@ def paginate(word_timings: list[dict], *, body_max: float,
             if len(_norm_token(best["word"])) >= 6:
                 best["neon"] = True
     return pages
+
+
+# Words that almost never END a thought — if a pause lands right after one
+# ("don't get ... frustrated", Jocko-style dramatic pauses), the cut backs off
+# to the last word that CAN close a phrase instead of ending the reel mid-air.
+_CONTINUATION_WORDS = frozenset({
+    "a", "an", "the", "this", "that", "these", "those", "some", "any",
+    "and", "but", "or", "nor", "so", "yet", "because", "cause", "cuz",
+    "than", "as", "if", "when", "while", "unless", "until", "though",
+    "although", "to", "of", "in", "on", "at", "by", "for", "with", "from",
+    "into", "onto", "about", "over", "under", "through", "between",
+    "against", "during", "without", "within", "across", "around", "toward",
+    "towards", "upon", "i", "you", "he", "she", "it", "we", "they", "my",
+    "your", "his", "her", "its", "our", "their", "me", "him", "us", "them",
+    "who", "whom", "whose", "which", "what", "is", "are", "was", "were",
+    "be", "been", "being", "am", "do", "does", "did", "dont", "doesnt",
+    "didnt", "can", "cant", "could", "couldnt", "will", "wont", "would",
+    "wouldnt", "should", "shouldnt", "must", "may", "might", "have", "has",
+    "had", "havent", "hasnt", "gonna", "wanna", "gotta", "get", "got",
+    "gets", "getting", "let", "lets", "keep", "keeps", "very", "really",
+    "just", "even", "still", "only", "not", "like", "um", "uh",
+})
+_MAX_BACKOFF_WORDS = 4
+
+
+def natural_cut(word_timings: list[dict],
+                ceiling: float) -> tuple[float, list[dict]]:
+    """Pick where the speech body should END. Returns (body_seconds,
+    kept_words): the latest end-of-thought — a sentence-ending word, or a
+    word followed by a >= PAUSE_BREAK_SECONDS silence — that fits under
+    `ceiling` seconds, backed off past dangling continuation words. Searching
+    only the last _CUT_SEARCH_WINDOW seconds below the ceiling keeps the reel
+    long — a clean ending is never bought by throwing away most of the
+    speech. Fallbacks, in order: the last full non-continuation word under
+    the ceiling, the last full word (never cut a word in half), then the raw
+    ceiling."""
+    n_fit = 0
+    for w in word_timings:
+        if w["end"] > ceiling - _CUT_TAIL_HOLD:
+            break
+        n_fit += 1
+    if n_fit == 0:
+        return ceiling, []
+
+    def _closes_thought(w: dict) -> bool:
+        if _SENTENCE_END_RE.search(w["word"].strip()):
+            return True
+        tok = _norm_token(w["word"])
+        return bool(tok) and tok not in _CONTINUATION_WORDS
+
+    def _settle(i: int) -> int | None:
+        """Back off from word i (inclusive) to the nearest thought-closer."""
+        for j in range(i, max(-1, i - _MAX_BACKOFF_WORDS - 1), -1):
+            if _closes_thought(word_timings[j]):
+                return j
+        return None
+
+    candidates: list[int] = []
+    for i in range(n_fit):
+        w = word_timings[i]
+        nxt = word_timings[i + 1] if i + 1 < len(word_timings) else None
+        gap = (nxt["start"] - w["end"]) if nxt else 999.0
+        if (gap >= PAUSE_BREAK_SECONDS
+                or _SENTENCE_END_RE.search(w["word"].strip())):
+            candidates.append(i)
+
+    floor = ceiling - _CUT_SEARCH_WINDOW
+    last = None
+    for i in reversed(candidates):
+        j = _settle(i)
+        if j is not None and word_timings[j]["end"] >= floor:
+            last = j
+            break
+    if last is None:
+        last = _settle(n_fit - 1)
+    if last is None:
+        last = n_fit - 1
+    kept = word_timings[: last + 1]
+    return min(kept[-1]["end"] + _CUT_TAIL_HOLD, ceiling), kept
 
 
 def _font(size: int) -> ImageFont.FreeTypeFont:
