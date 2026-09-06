@@ -97,6 +97,18 @@ Verified 2026-07-04. When an automation changes shape, update THIS file.
   the speech via power-word scoring — flat unpunctuated auto-caption
   transcripts use a sliding-window picker — no "Comment Send" hook, no AI
   talk, #motivation tags); `_ensure_captions` branches on Post Type.
+  **Third round 2026-09-06 (Goggins reel feedback):** non-vertical sources
+  are punched in 1.25x (`compositor._SPEECH_ZOOM` — faces read too small
+  raw) and vertically centered, and the word-pop caption band moves ONTO the
+  footage center (`compositor.speech_caption_band_y`;
+  `render_scrim(band_y=...)` moves the gradient with it) over a "frosted
+  bar" — a blurred (`boxblur=20:2`) + dimmed (0.4x) strip ~16% of the
+  clip's height — because source clips often carry their OWN burned-in
+  captions mid-frame that clashed with our font; a plain scrim (even alpha
+  ~200) left that full-width line legible, the frosted bar erases it and
+  reads as a deliberate caption band. Vertical sources keep the lower-third
+  band and no bar. Curation rule stands: prefer clips WITHOUT burned-in
+  captions.
 - **Motivation tab (2026-09-04):** motivation rows live on their OWN sheet
   tab `Motivation` (same spreadsheet, header row copied 1:1 from Reels; env
   override `GOOGLE_SHEET_MOTIVATION_NAME`) so the speech library doesn't mix

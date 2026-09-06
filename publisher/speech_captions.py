@@ -298,15 +298,23 @@ def _render_state(words: list[dict], current_idx: int, out_png: Path) -> None:
     img.save(out_png)
 
 
-def render_scrim(work_dir: Path) -> Path:
+def render_scrim(work_dir: Path, *, band_y: int = BAND_Y) -> Path:
     """Static full-canvas gradient scrim (transparent → soft black behind the
     caption band → transparent) overlaid for the whole body so text stays
-    readable and nothing flickers when caption states change."""
+    readable and nothing flickers when caption states change. `band_y` moves
+    the gradient with the band — since 2026-09-06 the band sits ON the
+    footage for non-vertical sources (covering the clip's own burned-in
+    captions), not at the fixed lower-third position."""
     work_dir.mkdir(parents=True, exist_ok=True)
     out = work_dir / "scrim.png"
     img = Image.new("RGBA", (CANVAS_W, CANVAS_H), (0, 0, 0, 0))
     px = img.load()
-    top_fade, plateau_a, plateau_b, bottom_fade = 950, 1150, 1500, 1700
+    # Offsets relative to the band's top edge (same shape the fixed 950/1150/
+    # 1500/1700 gradient had when band_y was always 1020).
+    top_fade = max(0, band_y - 70)
+    plateau_a = min(CANVAS_H - 1, band_y + 130)
+    plateau_b = min(CANVAS_H - 1, band_y + 480)
+    bottom_fade = min(CANVAS_H - 1, band_y + 680)
     max_alpha = 145
     for y in range(CANVAS_H):
         if y < top_fade or y > bottom_fade:

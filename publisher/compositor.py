@@ -186,6 +186,27 @@ _CINE_GRADE = (
 # actual content must always dominate the runtime.
 _MIN_BODY_SECONDS = 6.0
 
+# Motivation reels: zoom into the source by this factor (crop the outer edges,
+# keep the aspect ratio). User, 2026-09-06: faces read too small at the raw
+# original framing — punch in so people are seen clearly, without the full
+# cover-crop that hid speakers entirely. 1.25 trims 10% off each edge.
+_SPEECH_ZOOM = 1.25
+
+
+def speech_caption_band_y(source_video: Path, band_h: int) -> int | None:
+    """Top edge for the motivation reel's word-pop caption band: centered ON
+    the footage for a non-vertical source, so our Anton captions sit exactly
+    where source clips burn in their own captions and cover them (user,
+    2026-09-06 — the Goggins clip's baked-in mid-frame captions clashed with
+    ours). Returns None for a vertical/unknown source — the caller keeps its
+    lower-third default."""
+    src_w, src_h = probe_dimensions(source_video)
+    fg_h = int(round(CANVAS_W * src_h / src_w / 2) * 2) if src_w else 0
+    if 0 < fg_h < CANVAS_H - 120:
+        fg_y = (CANVAS_H - fg_h) // 2
+        return max(0, fg_y + (fg_h - band_h) // 2)
+    return None
+
 
 def build(
     card_png: Path,
@@ -491,14 +512,17 @@ def build_speech(
     cta_endcard: Path | None = None,
 ) -> Path:
     """Composite a MOTIVATION-SPEECH reel: the source clip at its ORIGINAL
-    aspect ratio (user, 2026-09-04 — cover-cropping hid the speaker's face)
-    scaled to full width and placed above the caption band, over a blurred +
-    darkened cover-crop of itself filling the rest of the canvas; the whole
-    frame gets the _CINE_GRADE cinematic look. Then the static gradient
-    scrim and the word-pop caption stream (a concat-demuxer slideshow of
-    transparent PNGs from publisher/speech_captions.py) overlaid at
-    `band_y`. Keeps the speech's own audio. A near-vertical source already
-    IS the original framing full-screen, so it cover-crops as before.
+    aspect ratio (user, 2026-09-04 — cover-cropping hid the speaker's face),
+    punched in by _SPEECH_ZOOM and scaled to full width, centered over a
+    blurred + darkened cover-crop of itself filling the rest of the canvas;
+    the whole frame gets the _CINE_GRADE cinematic look. Then the static
+    gradient scrim and the word-pop caption stream (a concat-demuxer
+    slideshow of transparent PNGs from publisher/speech_captions.py)
+    overlaid at `band_y` — which the caller centers ON the footage so our
+    captions cover any captions burned into the source clip (user,
+    2026-09-06). Keeps the speech's own audio. A near-vertical source
+    already IS the original framing full-screen, so it cover-crops as
+    before.
 
     Caption timings are relative to the source's t=0, which is also reel
     t=0 here — that alignment is the whole reason this format has no poster
@@ -527,22 +551,35 @@ def build_speech(
     body_target = (out_path.with_name(out_path.stem + "_bodyseg.mp4")
                    if cta_endcard else out_path)
 
-    # Original-framing layout: scale the clip to full width, keep its aspect
-    # ratio, and sit it just above the caption band (or vertically centered,
-    # whichever is lower on the canvas) over a blurred darkened cover-crop.
+    # Original-framing layout: punch into the clip by _SPEECH_ZOOM (crop the
+    # outer edges, aspect kept — faces read bigger; user 2026-09-06), scale to
+    # full width and center it vertically over a blurred darkened cover-crop.
+    # The caption band overlays ON the footage (band_y comes from
+    # speech_caption_band_y) so our text covers any captions burned into the
+    # source clip itself.
     src_w, src_h = probe_dimensions(source_video)
     fg_h = int(round(CANVAS_W * src_h / src_w / 2) * 2) if src_w else 0
     if 0 < fg_h < CANVAS_H - 120:
-        if fg_h <= band_y - 72:  # fits above the captions with margin
-            fg_y = min((CANVAS_H - fg_h) // 2, band_y - fg_h - 12)
-        else:                    # too tall — center it, captions overlay it
-            fg_y = (CANVAS_H - fg_h) // 2
-        log.info("Original framing: %dx%d source -> %dx%d at y=%d.",
-                 src_w, src_h, CANVAS_W, fg_h, fg_y)
+        fg_y = (CANVAS_H - fg_h) // 2
+        # Frosted caption bar: blur + dim the footage strip our captions sit
+        # on, so any captions BURNED INTO the source clip (a full-width line
+        # our 1-2 word pages could never blanket) are unreadable behind our
+        # text — a plain scrim left them legible (verified on the Goggins
+        # clip, user 2026-09-06). Reads as a deliberate dark caption band.
+        strip_h = max(64, int(round(fg_h * 0.16 / 2)) * 2)
+        log.info("Original framing: %dx%d source -> %dx%d at y=%d "
+                 "(zoom %.2fx, %dpx frosted bar, captions on footage "
+                 "at y=%d).",
+                 src_w, src_h, CANVAS_W, fg_h, fg_y, _SPEECH_ZOOM,
+                 strip_h, band_y)
         frame_chain = (
             f"[0:v]split=2[bgsrc][fgsrc];"
             f"[bgsrc]{_COVER_FILTER},boxblur=32:2,eq=brightness=-0.22[bg];"
-            f"[fgsrc]scale={CANVAS_W}:-2,setsar=1[fgs];"
+            f"[fgsrc]crop=iw/{_SPEECH_ZOOM}:ih/{_SPEECH_ZOOM},"
+            f"scale={CANVAS_W}:-2,setsar=1,split=2[fga][fgb];"
+            f"[fgb]crop=iw:{strip_h}:0:(ih-{strip_h})/2,"
+            f"boxblur=20:2,colorchannelmixer=rr=0.4:gg=0.4:bb=0.4[fstrip];"
+            f"[fga][fstrip]overlay=0:(H-{strip_h})/2[fgs];"
             f"[bg][fgs]overlay=0:{fg_y}[comp];"
         )
     else:

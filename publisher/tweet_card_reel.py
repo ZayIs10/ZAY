@@ -694,7 +694,8 @@ def _build_motivation_reel(source_video: Path, video_url: str,
     message telling the user to pick a clip with spoken audio/captions.
     """
     from publisher import speech_captions  # noqa: E402
-    from publisher.compositor import build_speech, probe_duration  # noqa: E402
+    from publisher.compositor import (build_speech, probe_duration,  # noqa: E402
+                                      speech_caption_band_y)
     from publisher.media_sources.word_timing import fetch_word_timings  # noqa: E402
 
     words = fetch_word_timings(video_url)
@@ -731,13 +732,20 @@ def _build_motivation_reel(source_video: Path, video_url: str,
     work_dir = TMP_DIR / f"{slug}_speech"
     ffconcat = speech_captions.render_caption_states(
         pages, work_dir, body_max=body_max)
-    scrim = speech_captions.render_scrim(work_dir)
+
+    # Center the caption band ON the footage for non-vertical sources so our
+    # Anton captions cover any captions burned into the clip itself (user,
+    # 2026-09-06); vertical/unknown sources keep the lower-third default.
+    band_y = speech_caption_band_y(source_video, speech_captions.BAND_H)
+    if band_y is None:
+        band_y = speech_captions.BAND_Y
+    scrim = speech_captions.render_scrim(work_dir, band_y=band_y)
 
     out_mp4 = RENDERS_DIR / f"{slug}-tweet.mp4"
     log.info("Compositing motivation reel -> %s", out_mp4.name)
     build_speech(
         source_video, scrim, ffconcat, out_mp4,
-        band_y=speech_captions.BAND_Y,
+        band_y=band_y,
         max_seconds=body_max,
         cta_endcard=None,
     )
