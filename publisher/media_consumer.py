@@ -148,18 +148,26 @@ _YT_CLIENTS_WITH_COOKIES = ("web", "tv", "ios")
 PROXIED_WHOLEFILE_MAX_BYTES = 60_000_000
 
 
-def _ytdlp_base_opts(dest: Path, section_seconds: float | None = None) -> dict:
+def _ytdlp_base_opts(dest: Path, section_seconds: float | None = None,
+                     section_start: float = 0.0) -> dict:
     """Shared yt-dlp options for every client attempt.
 
-    `section_seconds`: if set, download ONLY the first N seconds of the video
-    instead of the whole thing. The reel only ever uses the START of the source
-    clip (the compositor trims to <=60s from the beginning), so for a 10-minute
-    source this fetches ~60s and skips the rest — a big bandwidth saving with
-    ZERO quality loss. This matters whenever the download is metered: it makes
-    a future residential proxy nearly free, and it speeds up every build today.
-    Implemented via yt-dlp `download_ranges`, which makes the DASH downloader
-    fetch only the fragments covering [0, N]; the compositor still does the
-    exact final cut, so frame-accurate boundaries aren't needed here.
+    `section_seconds`: if set, download ONLY N seconds of the video instead of
+    the whole thing. The reel only ever uses one contiguous stretch of the
+    source clip, so for a 10-minute source this fetches ~60s and skips the
+    rest — a big bandwidth saving with ZERO quality loss. This matters
+    whenever the download is metered: it makes a residential proxy nearly
+    free, and it speeds up every build today. Implemented via yt-dlp
+    `download_ranges`, which makes the DASH downloader fetch only the
+    fragments covering the range; the compositor still does the exact final
+    cut, so frame-accurate boundaries aren't needed at start 0.
+
+    `section_start`: where the range begins (motivation reels cut the
+    HIGHLIGHT out of a long speech, not the opening — see
+    speech_captions.best_window). A non-zero start additionally forces
+    keyframes at the cut (a re-encode of just the section), because a plain
+    copy starts at the nearest earlier keyframe and the word-timed captions
+    would drift out of sync by that unknown offset.
     """
     opts = {
         # Permissive: any video+audio, merged to mp4. The strict ext=mp4
@@ -213,8 +221,14 @@ def _ytdlp_base_opts(dest: Path, section_seconds: float | None = None) -> dict:
         # download_range_func lives in yt_dlp.utils; import lazily so
         # this module still loads without yt-dlp.
         from yt_dlp.utils import download_range_func  # type: ignore
+        start = max(0.0, float(section_start))
         opts["download_ranges"] = download_range_func(
-            None, [(0.0, float(section_seconds))])
+            None, [(start, start + float(section_seconds))])
+        if start > 0:
+            # Frame-accurate cut: without this the file starts at the nearest
+            # keyframe BEFORE `start` (unknown offset) and every word-timed
+            # caption lands early by that much.
+            opts["force_keyframes_at_cuts"] = True
 
     # Residential proxy (DataImpulse). When PROXY_URL is set, route every
     # download through it so the build can run on GitHub's CLOUD runners — whose
@@ -276,7 +290,8 @@ def _is_bot_block(exc: Exception) -> bool:
 
 
 def _ytdlp_download(url: str, dest: Path,
-                    section_seconds: float | None = None) -> None:
+                    section_seconds: float | None = None,
+                    section_start: float = 0.0) -> None:
     """Download the best portrait-leaning MP4 via yt-dlp, trying multiple
     YouTube player clients so we don't depend on (rot-prone) login cookies.
 
@@ -357,7 +372,8 @@ def _ytdlp_download(url: str, dest: Path,
                     "whole-file retry (capped at %d MB) through the metered "
                     "proxy. Later clients get ranged attempts only.",
                     PROXIED_WHOLEFILE_MAX_BYTES // 1_000_000)
-            opts = _ytdlp_base_opts(dest, section_seconds=plan_seconds)
+            opts = _ytdlp_base_opts(dest, section_seconds=plan_seconds,
+                                    section_start=section_start)
             opts["extractor_args"] = {"youtube": {"player_client": [client]}}
             if use_cookies and cookiefile:
                 opts["cookiefile"] = cookiefile
@@ -449,6 +465,36 @@ def _ffmpeg_cut_to_beat(src: Path, dest: Path, duration_s: float) -> None:
         )
 
 
+def cut_section(src: Path, start_seconds: float, duration_s: float) -> Path:
+    """Cut [start, start+duration] out of a LOCAL file, frame-accurate
+    (re-encode; -ss before -i with an output re-encode seeks exactly).
+    Needed when the proxied whole-file fallback fetched the ENTIRE video but
+    the motivation reel wants a mid-video highlight whose captions are timed
+    from `start_seconds`. Replaces src with the cut (same contract as the
+    ranged download: file t=0 == highlight start)."""
+    dest = src.with_name(src.stem + "_sect.mp4")
+    cmd = [
+        _resolve_ffmpeg(), "-y", "-loglevel", "warning",
+        "-ss", f"{start_seconds:.3f}", "-i", str(src),
+        "-t", f"{duration_s:.2f}",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+        "-c:a", "aac", "-b:a", "192k",
+        "-movflags", "+faststart",
+        str(dest),
+    ]
+    proc = subprocess.run(cmd)
+    if proc.returncode != 0 or not dest.exists() or dest.stat().st_size == 0:
+        raise RuntimeError(
+            f"ffmpeg failed to cut section {start_seconds:.1f}s+{duration_s:.1f}s "
+            f"from {src} (exit {proc.returncode})"
+        )
+    src.unlink(missing_ok=True)
+    dest.rename(src)
+    log.info("Local section cut: %s now starts at %.1fs of the source "
+             "(%.1f MB).", src.name, start_seconds, src.stat().st_size / 1e6)
+    return src
+
+
 def fetch_video(url: str, slug: str, durations: list[float]) -> list[str]:
     """Download `url` once, then cut into one clip per beat. Returns paths
     relative to `reels/index.html`."""
@@ -476,24 +522,32 @@ def fetch_video(url: str, slug: str, durations: list[float]) -> list[str]:
     return rels
 
 
-def fetch_single_clip(url: str, slug: str, *, max_seconds: float = 60.0) -> Path:
+def fetch_single_clip(url: str, slug: str, *, max_seconds: float = 60.0,
+                      start_seconds: float = 0.0) -> Path:
     """Download `url` once, return ONE mp4 path. Used by the tweet-card
     reel pipeline (the static caption + variable-length source video
     format) where downstream wants the whole clip, not per-beat splits.
 
+    `start_seconds` shifts the downloaded section into the video (motivation
+    reels cut the transcript-scored highlight, not the opening). Only applies
+    to YouTube sources; a direct URL is always fetched whole.
+
     The clip is NOT re-encoded here — duration capping and scale/crop
     happen later in `publisher/compositor.py` so the source bytes stay
     on disk for retry / debugging without burning a transcode pass.
+    (Exception: a non-zero start forces keyframes at the cut inside yt-dlp —
+    see _ytdlp_base_opts — because caption sync needs an exact start.)
     """
     CLIP_DIR.mkdir(parents=True, exist_ok=True)
     raw = CLIP_DIR / f"_single_{slug}.mp4"
 
     if _is_youtube(url):
         log.info("Downloading YouTube clip via yt-dlp: %s", url)
-        # The reel uses at most `max_seconds` from the START of the clip (the
-        # compositor trims to that), so only download that opening section — a
-        # 10-min source no longer pulls 10 min of data. +2s is a safety buffer.
-        _ytdlp_download(url, raw, section_seconds=max_seconds + 2.0)
+        # The reel uses at most `max_seconds` of the clip (the compositor
+        # trims to that), so only download that section — a 10-min source no
+        # longer pulls 10 min of data. +2s is a safety buffer.
+        _ytdlp_download(url, raw, section_seconds=max_seconds + 2.0,
+                        section_start=start_seconds)
     else:
         log.info("Downloading direct video: %s", url)
         _http_download(url, raw)

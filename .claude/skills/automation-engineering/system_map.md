@@ -109,6 +109,24 @@ Verified 2026-07-04. When an automation changes shape, update THIS file.
   reads as a deliberate caption band. Vertical sources keep the lower-third
   band and no bar. Curation rule stands: prefer clips WITHOUT burned-in
   captions.
+  **Fourth round 2026-09-08 (McRaven reel feedback — highlight-first):** the
+  reel no longer uses the OPENING of the video (the McRaven build rendered
+  the ceremonial thank-yous, not "make your bed"). For motivation rows the
+  pipeline now fetches the FREE transcript BEFORE downloading
+  (`tweet_card_reel._motivation_window`), scores every sentence-start window
+  with `speech_captions.best_window` (POWER_WORDS + ALL-CAPS + numbers +
+  "you"-address density over a REEL_MAX_SECONDS window; deterministic, no
+  GPT) and downloads ONLY that section — `fetch_single_clip(...,
+  start_seconds=...)` → yt-dlp `download_ranges` with a non-zero start +
+  `force_keyframes_at_cuts` (re-encode at the cut) so file t=0 is EXACTLY
+  the window start and the shifted word timings stay in sync. A short/
+  pre-cut source (≤ ~1.35x reel length) or a zero-scoring transcript keeps
+  the old from-the-start behavior. The proxied whole-file fallback is
+  corrected after download via `media_consumer.cut_section` (local
+  frame-accurate re-encode cut). This also lifted a hidden cap: the old
+  `max_seconds=60.0` download meant every motivation reel could only use
+  the first ~62s despite the 1:40 promise — motivation downloads now fetch
+  REEL_MAX_SECONDS.
 - **Motivation tab (2026-09-04):** motivation rows live on their OWN sheet
   tab `Motivation` (same spreadsheet, header row copied 1:1 from Reels; env
   override `GOOGLE_SHEET_MOTIVATION_NAME`) so the speech library doesn't mix

@@ -551,13 +551,29 @@ def build_reel_for_row(row: dict) -> Path:
     candidates = _candidate_video_urls(row)
     source_video = None
     used_url = ""
+    mot_words: list[dict] | None = None
+    win_start = 0.0
     errors: list[str] = []
     for i, cand in enumerate(candidates, start=1):
         label = "primary" if i == 1 else f"backup {i - 1}"
         log.info("Downloading source video (%s of %d, %s): %s",
                  i, len(candidates), label, cand)
+        if is_motivation:
+            # Highlight-first (user, 2026-09-08: the reel rendered the
+            # INTRO of a long speech, not the inspiring part): fetch the
+            # free transcript BEFORE downloading, score it for the most
+            # motivational stretch, then download ONLY that section. Also
+            # lifts the old hidden cap — max_seconds=60.0 meant every
+            # motivation reel could only ever use the first ~62s despite
+            # the 1:40 REEL_MAX_SECONDS promise.
+            mot_words, win_start = _motivation_window(cand)
         try:
-            got = fetch_single_clip(cand, slug, max_seconds=60.0)
+            from publisher import speech_captions  # noqa: E402
+            mot_len = speech_captions.REEL_MAX_SECONDS
+            got = fetch_single_clip(
+                cand, slug,
+                max_seconds=mot_len if is_motivation else 60.0,
+                start_seconds=win_start)
         except ProxyExhaustedError:
             # Infrastructure, not this URL: every backup goes through the same
             # empty proxy. Propagate so the row is PARKED, not skipped-burned.
@@ -596,7 +612,21 @@ def build_reel_for_row(row: dict) -> Path:
         # Speech format: no poster, no tweet card, no viral hook (the
         # speech's own opening line IS the hook — a viralhooks clip in front
         # would delay it, clash tonally, and break the t=0 caption sync).
-        return _build_motivation_reel(Path(source_video), video_url, slug)
+        if win_start > 0:
+            from publisher import speech_captions  # noqa: E402
+            from publisher.compositor import probe_duration  # noqa: E402
+            from publisher.media_consumer import cut_section  # noqa: E402
+            src_dur = probe_duration(Path(source_video))
+            if src_dur > speech_captions.REEL_MAX_SECONDS + 15:
+                # The proxied whole-file fallback fetched the ENTIRE video;
+                # cut the highlight locally so file t=0 == window start,
+                # matching the shifted caption timings.
+                log.info("Whole-file fallback detected (%.0fs) — cutting "
+                         "the highlight window locally.", src_dur)
+                cut_section(Path(source_video), win_start,
+                            speech_captions.REEL_MAX_SECONDS + 2.0)
+        return _build_motivation_reel(Path(source_video), video_url, slug,
+                                      words=mot_words)
 
     # Poster: use the row's image if present, else fall back to the video's
     # own thumbnail (always available for a YouTube clip) so a missing image
@@ -680,8 +710,40 @@ def build_reel_for_row(row: dict) -> Path:
     return out_mp4
 
 
+def _motivation_window(video_url: str) -> tuple[list[dict] | None, float]:
+    """Highlight-first source selection for motivation reels. Fetches the
+    free transcript for `video_url`, asks speech_captions.best_window for
+    the most motivational stretch, and returns (words shifted so the window
+    start is t=0, window start in source seconds). A source with no fetchable
+    captions returns (None, 0.0) — the caller downloads the opening and
+    _build_motivation_reel raises its usual pick-a-captioned-clip error."""
+    from publisher import speech_captions  # noqa: E402
+    from publisher.media_sources.word_timing import fetch_word_timings  # noqa: E402
+
+    try:
+        words = fetch_word_timings(video_url)
+    except Exception as exc:  # noqa: BLE001 — download still gets its chance
+        log.warning("Transcript fetch failed (%s) — falling back to the "
+                    "opening of the video.", exc)
+        return None, 0.0
+    if not words:
+        return None, 0.0
+
+    win_start = speech_captions.best_window(words)
+    if win_start <= 0:
+        return words, 0.0
+    pad = speech_captions.REEL_MAX_SECONDS + 2.0
+    shifted = [
+        {**w, "start": w["start"] - win_start, "end": w["end"] - win_start}
+        for w in words
+        if w["end"] > win_start and w["start"] < win_start + pad
+    ]
+    return shifted, win_start
+
+
 def _build_motivation_reel(source_video: Path, video_url: str,
-                           slug: str) -> Path:
+                           slug: str, *,
+                           words: list[dict] | None = None) -> Path:
     """Render the motivation-speech format (@peakzmotivation style): the
     speech clip fills the whole frame, its own audio plays from t=0, and
     word-by-word Anton captions pop in sync — white with the power words in
@@ -698,7 +760,11 @@ def _build_motivation_reel(source_video: Path, video_url: str,
                                       speech_caption_band_y)
     from publisher.media_sources.word_timing import fetch_word_timings  # noqa: E402
 
-    words = fetch_word_timings(video_url)
+    if words is None:
+        # Direct callers (tests, legacy) pass a source that starts at video
+        # t=0 — fetch timings here, unshifted. The pipeline passes `words`
+        # already shifted to the highlight window it downloaded.
+        words = fetch_word_timings(video_url)
     if not words:
         raise RuntimeError(
             "Source video has no fetchable captions — the motivation format "
@@ -721,9 +787,9 @@ def _build_motivation_reel(source_video: Path, video_url: str,
     pages = speech_captions.paginate(kept_words, body_max=body_max)
     if not pages:
         raise RuntimeError(
-            f"No caption words land inside the first {body_max:.0f}s of the "
-            "clip — the speech may start later in the video. Pick a pre-cut "
-            "speech clip that talks from the start."
+            f"No caption words land inside the {body_max:.0f}s body — the "
+            "transcript timing doesn't cover this stretch of the video. "
+            "Pick a clip whose captions cover the speech."
         )
     n_words = sum(len(p) for p in pages)
     log.info("Motivation reel: %d words on %d caption pages across %.1fs.",

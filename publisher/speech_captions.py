@@ -210,6 +210,82 @@ def natural_cut(word_timings: list[dict],
     return min(kept[-1]["end"] + _CUT_TAIL_HOLD, ceiling), kept
 
 
+# best_window: how much longer than one reel a source must be before we go
+# hunting for the highlight instead of taking the opening. A pre-cut upload
+# (the speech already trimmed to reel length) keeps the old from-the-start
+# behavior — its opening IS the speech.
+_WINDOW_HUNT_FACTOR = 1.35
+# Direct address ("you", "your") is the motivational register — a segment
+# lecturing THE VIEWER outranks one telling a background story.
+_ADDRESS_WORDS = frozenset({"you", "your", "yourself", "yours", "youre"})
+_LEAD_IN_SECONDS = 0.3   # tiny pre-roll so the first word isn't clipped
+
+
+def best_window(word_timings: list[dict],
+                window_seconds: float = REEL_MAX_SECONDS) -> float:
+    """Where should the reel START? Scans the WHOLE transcript and returns the
+    start time (seconds) of the most motivational `window_seconds` stretch —
+    long podcast/speech uploads talk through minutes of setup before the part
+    people clip (user, 2026-09-08: the McRaven reel rendered the intro, not
+    "make your bed"). Free + deterministic: windows are scored by the same
+    signal family pick_power_words paints neon — POWER_WORDS, ALL-CAPS
+    emphasis, numbers — plus direct address ("you"), and only sentence starts
+    (after .!? or a real pause) are candidate cut-in points, so the reel never
+    opens mid-thought. Returns 0.0 for a short/pre-cut source or a transcript
+    with no signal (old behavior: use the opening)."""
+    if not word_timings:
+        return 0.0
+    if word_timings[-1]["end"] <= window_seconds * _WINDOW_HUNT_FACTOR:
+        return 0.0
+
+    scores: list[float] = []
+    for w in word_timings:
+        raw = w["word"].strip()
+        tok = _norm_token(raw)
+        s = 0.0
+        if tok in POWER_WORDS:
+            s += 2.0
+        if tok in _ADDRESS_WORDS:
+            s += 0.5
+        if any(c.isdigit() for c in tok) or "$" in tok or "%" in tok:
+            s += 1.0
+        if len(raw) >= 3 and raw.isupper() and raw.isalpha():
+            s += 1.0
+        if raw.endswith("!"):
+            s += 0.5
+        scores.append(s)
+    prefix = [0.0]
+    for s in scores:
+        prefix.append(prefix[-1] + s)
+
+    starts = [0]
+    for i in range(1, len(word_timings)):
+        prev = word_timings[i - 1]
+        gap = word_timings[i]["start"] - prev["end"]
+        if (gap >= PAUSE_BREAK_SECONDS
+                or _SENTENCE_END_RE.search(prev["word"].strip())):
+            starts.append(i)
+
+    best_i, best_score = 0, -1.0
+    j = 0
+    for i in starts:
+        t0 = word_timings[i]["start"]
+        j = max(j, i)
+        while (j < len(word_timings)
+               and word_timings[j]["end"] <= t0 + window_seconds):
+            j += 1
+        score = prefix[j] - prefix[i]
+        if score > best_score:   # ties keep the EARLIEST window (stable)
+            best_i, best_score = i, score
+    if best_i == 0 or best_score <= 0:
+        return 0.0
+    start = max(0.0, word_timings[best_i]["start"] - _LEAD_IN_SECONDS)
+    log.info("Highlight window: start %.1fs (word %d/%d, score %.1f) — "
+             "opens on: %s", start, best_i, len(word_timings), best_score,
+             " ".join(w["word"] for w in word_timings[best_i:best_i + 8]))
+    return start
+
+
 def _font(size: int) -> ImageFont.FreeTypeFont:
     try:
         return ImageFont.truetype(str(_ANTON), size)
