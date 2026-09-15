@@ -348,6 +348,31 @@ that side's run.
   non-proxy reason the same client retries whole-file (never worse than
   the old behavior). See `media_consumer._ytdlp_base_opts`/`_ytdlp_download`.
 
+- **"Skipped - No Video" on a row WITH a valid hand-picked YouTube URL
+  (2026-09-11, Denzel motivation row):** the URL WAS read and used — the
+  download itself failed because YouTube now demands a **PO token** for
+  real formats. Symptoms in the log: `tv` → "The page needs to be
+  reloaded"; `ios`/`web`/`web_safari` → "Requested format is not
+  available"; `android`/`mweb`/`web_embedded` → a 217 KB STUB (header
+  claims full duration, ffmpeg: "Cannot determine format of input after
+  EOF" / "partial file"); DASH → HTTP 403. Verbose yt-dlp shows
+  `[pot] PO Token Providers: none`. Three compounding bugs fixed:
+  (1) the runner venv kept yt-dlp 2026.6.9 for 3 months (`pip install
+  yt-dlp` without `-U`); (2) `_ytdlp_download` treated the android ffmpeg
+  error as "non-recoverable" and aborted the chain on attempt #3 before
+  trying the rest; (3) `size > 0` accepted the stub as success. Now:
+  `bgutil-ytdlp-pot-provider` plugin + its Node server at
+  `C:\actions-runner\bgutil-pot\server` (PC) / `~/bgutil-ytdlp-pot-provider/server`
+  (cloud), started on demand by `publisher/pot_provider.py` (HTTP mode —
+  script mode times out on the 12 s Node startup); clients reordered
+  `mweb, web_embedded, tv, ios, web_safari, android_vr, android`; on the
+  free home IP the WHOLE file is fetched first (native downloader, 17 s)
+  and cut locally — the ranged ffmpeg fetch took 367 s for 102 s and is
+  the path that 403s; `_looks_like_stub` rejects < 40 kbps / undecodable
+  files; only `_is_dead_video` errors abort early. Re-verify by hand:
+  `yt-dlp -v URL 2>&1 | grep pot` must show `bgutil:http` retrieving a
+  token, and `mweb` must download a real multi-MB file.
+
 - **Proxy `407 TRAFFIC_EXHAUSTED` = DataImpulse account out of traffic**
   (seen 2026-08-02, burned 8 topics): the proxy rejects every CONNECT, so
   ALL yt-dlp clients/backup URLs fail — it is NOT a YouTube/bot problem and

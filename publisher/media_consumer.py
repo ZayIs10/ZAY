@@ -127,13 +127,26 @@ def _http_download(url: str, dest: Path) -> None:
 # datacenter IP (GitHub Actions). Trying them in turn means we download WITHOUT
 # needing login cookies — which rot every week or two and were the real cause
 # of rows being skipped "no video found". Order = most-reliable-cookieless first.
-#   tv          — the living-room client; very lenient, rarely bot-gated.
-#   ios / android — mobile app clients; separate quota, usually cookieless-ok.
-#   web_safari  — desktop Safari surface; sometimes works when `web` is gated.
-# `web` is intentionally LAST (and only with cookies) because it's the one that
-# bot-blocks. See yt-dlp wiki: Extractors#youtube player_client.
-_YT_CLIENTS_COOKIELESS = ("tv", "ios", "android", "web_safari")
-_YT_CLIENTS_WITH_COOKIES = ("web", "tv", "ios")
+# Re-verified 2026-09-11 from the home IP (yt-dlp 2026.8.19) with the PO-token
+# provider running (publisher/pot_provider.py) — without a PO token EVERY
+# client below fails or returns a stub:
+#   mweb / web_embedded — serve the real DASH file (398+251, 34 MB/9 min). FIRST.
+#   tv          — "The page needs to be reloaded" challenge (no formats) today,
+#                 but historically the most lenient client; keep as a rotation.
+#   ios / web_safari — "Requested format is not available" today.
+#   android_vr  — lists formats but the media URL 403s.
+#   android     — returns a 217 KB STUB (see _looks_like_stub). LAST.
+# `web` only with cookies — it's the one that bot-blocks cookieless.
+# See yt-dlp wiki: Extractors#youtube player_client.
+_YT_CLIENTS_COOKIELESS = ("mweb", "web_embedded", "tv", "ios", "web_safari",
+                          "android_vr", "android")
+_YT_CLIENTS_WITH_COOKIES = ("web", "mweb", "tv")
+
+# Whole-file ceiling on the FREE (un-proxied, home-IP) path. Bandwidth is
+# unmetered there, so this only guards disk/time against a multi-hour source:
+# yt-dlp refuses up front from the format's reported size, and the ranged
+# plan then runs instead. 800 MB ≈ a 2-hour 1080p talk.
+UNPROXIED_WHOLEFILE_MAX_BYTES = 800_000_000
 
 # HARD SPEND CEILING for the whole-file fallback when downloading through the
 # METERED residential proxy. A ranged download is ~2-4 MB, but the whole-file
@@ -245,6 +258,9 @@ def _ytdlp_base_opts(dest: Path, section_seconds: float | None = None,
         # source can never silently drain the balance (see the constant).
         if not (section_seconds and section_seconds > 0):
             opts["max_filesize"] = PROXIED_WHOLEFILE_MAX_BYTES
+    elif not (section_seconds and section_seconds > 0):
+        # Free path whole-file: only a sanity ceiling (see the constant).
+        opts["max_filesize"] = UNPROXIED_WHOLEFILE_MAX_BYTES
     ff = _resolve_ffmpeg()
     if ff and ff != "ffmpeg":
         # yt-dlp merges video+audio with ffmpeg; point it at the resolved
@@ -286,7 +302,69 @@ def _is_bot_block(exc: Exception) -> bool:
         # Another client (ios/android) usually serves the same video fine, so
         # this must rotate, not abort the whole chain on attempt #1.
         or "page needs to be reloaded" in msg
+        # 2026-09-11: without a PO token YouTube 403s the real media URL on
+        # several clients (android_vr, the default rotation). Another client
+        # (mweb/web_embedded via the provider) serves it — rotate, don't abort.
+        or "http error 403" in msg
     )
+
+
+def _is_dead_video(exc: Exception) -> bool:
+    """True ONLY for errors that mean the VIDEO itself is gone or locked —
+    the cases no client, cookie or token can fix, so trying more is a waste.
+    Everything else (ffmpeg range hiccups, stub files, transient network) is
+    treated as recoverable and rotates to the next plan/client. This used to
+    be the inverse ("anything not a bot-block is fatal") and that is exactly
+    how the Denzel row died on 2026-09-11: attempt #3's ffmpeg error aborted
+    the whole chain before the clients that would have worked were tried."""
+    msg = str(exc).lower()
+    return (
+        "video unavailable" in msg
+        or "private video" in msg
+        or "has been removed" in msg
+        or "this video is not available" in msg
+        or "not available in your country" in msg
+        or "account associated with this video has been terminated" in msg
+        or "is not a valid url" in msg
+    )
+
+
+def _looks_like_stub(path: Path) -> str | None:
+    """Return a reason string when `path` is NOT a real playable video.
+
+    YouTube's anti-bot response (2026-09) is not always an error: the
+    `android` / `mweb` / `web_embedded` clients without a PO token hand yt-dlp
+    a 217 KB MP4 whose header claims the full 9-minute duration but whose
+    data track is empty. yt-dlp reports success, the old `size > 0` check
+    passed it, and the build only found out at render time (or never).
+    Two cheap checks catch it: implausible bitrate (< 40 kbps for something
+    claiming to be video), and ffmpeg failing to decode a couple of seconds.
+    """
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return "file missing"
+    if size == 0:
+        return "empty file"
+    from publisher.compositor import probe_duration  # noqa: E402
+    try:
+        dur = probe_duration(path)
+    except Exception:  # noqa: BLE001 — probe failure = unreadable file
+        return "ffprobe cannot read the file"
+    if dur and dur > 0:
+        kbps = size * 8 / dur / 1000
+        if kbps < 40:
+            return (f"stub: {size / 1e3:.0f} KB for a claimed {dur:.0f}s "
+                    f"({kbps:.1f} kbps)")
+    ss = 5.0 if (dur or 0) > 12 else 0.0
+    proc = subprocess.run(
+        [_resolve_ffmpeg(), "-v", "error", "-ss", f"{ss:.1f}", "-i", str(path),
+         "-t", "2", "-f", "null", "-"],
+        capture_output=True, text=True)
+    err = (proc.stderr or "").lower()
+    if "invalid data" in err or "partial file" in err or proc.returncode != 0:
+        return f"ffmpeg cannot decode it: {err.strip().splitlines()[-1][:120] if err.strip() else 'exit ' + str(proc.returncode)}"
+    return None
 
 
 def _ytdlp_download(url: str, dest: Path,
@@ -295,19 +373,27 @@ def _ytdlp_download(url: str, dest: Path,
     """Download the best portrait-leaning MP4 via yt-dlp, trying multiple
     YouTube player clients so we don't depend on (rot-prone) login cookies.
 
-    `section_seconds` (optional) limits the download to the first N seconds of
-    the video — see _ytdlp_base_opts. Pass it whenever the caller only needs the
-    opening of the clip (the reel always does) to avoid pulling the whole file.
+    `section_seconds` (optional) limits the download to N seconds of the
+    video from `section_start` — see _ytdlp_base_opts.
 
-    Strategy:
-      1. Try a sequence of COOKIELESS clients (tv/ios/android/web_safari).
-         Most YouTube videos download from at least one of these without any
-         login — so a missing/expired cookie no longer means "no video".
-      2. If cookies ARE present, also try the cookie'd `web` client (some
-         age-gated/region clips still need it). Cookies are now a BONUS, not a
-         requirement.
-    A bot-block on one client is retried on the next; a non-bot error (truly
-    dead/removed video) stops early so we don't waste time on hopeless URLs.
+    Strategy (re-worked 2026-09-11, see publisher/pot_provider.py):
+      0. Make sure the PO-token provider is up. YouTube now demands a PO
+         token on every client; without one downloads 403 or return stubs.
+      1. Try clients in `_YT_CLIENTS_COOKIELESS` order; with cookies present
+         also the cookie'd ones. A bot-block / 403 / no-format on one client
+         rotates to the next.
+      2. Per client, the download PLAN depends on the network:
+         - FREE home IP (no PROXY_URL): WHOLE FILE FIRST. It uses yt-dlp's
+           native downloader (fast: 34 MB in seconds, tokens attached) and the
+           caller cuts locally (motivation reels: cut_section; tweet-card:
+           the compositor trims). The RANGED plan is only the fallback — it
+           hands the fetch to ffmpeg, which took 367 s for 102 s of video and
+           is the path that 403s / hits stubs.
+         - METERED proxy: RANGED FIRST (cheap), then ONE capped whole-file
+           retry per build (unchanged spend rules).
+      3. Every produced file is validated (`_looks_like_stub`) — a 217 KB
+         "success" is a failure and rotates.
+      4. Only a genuinely DEAD video (`_is_dead_video`) aborts early.
     """
     try:
         from yt_dlp import YoutubeDL  # type: ignore
@@ -323,6 +409,12 @@ def _ytdlp_download(url: str, dest: Path,
         # Never log the proxy URL itself — it contains the login:password.
         log.info("PROXY_URL set — routing YouTube download through residential "
                  "proxy (cloud-runner / laptop-off mode).")
+
+    # Step 0 — PO token provider (best-effort, never raises).
+    from publisher import pot_provider  # noqa: E402
+    if not pot_provider.ensure_running():
+        log.warning("Downloading WITHOUT a PO-token provider — expect 403s / "
+                    "stub files on most clients.")
 
     cookiefile = _youtube_cookiefile()
 
@@ -343,24 +435,25 @@ def _ytdlp_download(url: str, dest: Path,
 
     proxied = bool(os.environ.get("PROXY_URL", "").strip())
     last_exc: Exception | None = None
-    # The whole-file fallback is offered AT MOST ONCE PER BUILD, not once per
-    # client. It used to be per-client, so a source that trips ffmpeg's range
-    # fetch on every client could trigger up to 7 whole-video downloads in a
-    # single build (0.5-3.2 GB through a metered proxy). One attempt is enough
-    # to prove whether whole-file helps; if it doesn't, more won't.
+    # Under the METERED proxy the whole-file fallback is offered AT MOST ONCE
+    # PER BUILD, not once per client. It used to be per-client, so a source
+    # that trips ffmpeg's range fetch on every client could trigger up to 7
+    # whole-video downloads in a single build (0.5-3.2 GB through a metered
+    # proxy). One attempt is enough to prove whether whole-file helps.
     wholefile_spent = False
+    wants_section = bool(section_seconds and section_seconds > 0)
     for client, use_cookies in attempts:
-        # Per client: try the cheap RANGED download first (only the opening
-        # section — what the reel actually uses). Under the metered proxy,
-        # if the ranged attempt dies for a reason that is neither bot-block
-        # nor proxy-exhaustion (e.g. a stream that trips ffmpeg's range
-        # fetch — the old exit-251 family), fall back to the WHOLE-file
-        # download for the same client: never worse than the pre-range
-        # behavior, just costlier. Without a proxy the whole-file retry is
-        # pointless (nothing metered changed), so keep the old semantics.
-        plans: list[float | None] = [section_seconds]
-        if proxied and section_seconds and not wholefile_spent:
-            plans.append(None)
+        if proxied:
+            # Metered: cheap RANGED first; ONE capped whole-file retry/build.
+            plans: list[float | None] = [section_seconds]
+            if wants_section and not wholefile_spent:
+                plans.append(None)
+        else:
+            # Free home IP: WHOLE FILE first (native downloader, fast,
+            # PO-token-aware); ranged (ffmpeg fetch) only as the fallback.
+            plans = [None]
+            if wants_section:
+                plans.append(section_seconds)
         for plan_seconds in plans:
             ranged_plan = plan_seconds is not None and plan_seconds > 0
             if not ranged_plan and proxied:
@@ -391,12 +484,21 @@ def _ytdlp_download(url: str, dest: Path,
                 with YoutubeDL(opts) as ydl:
                     ydl.download([url])
                 if dest.exists() and dest.stat().st_size > 0:
-                    log.info(
-                        "yt-dlp SUCCESS via client=%s%s (%s, %.1f MB)",
-                        client, " (with cookies)" if use_cookies else "",
-                        "ranged" if ranged_plan else "whole-file",
-                        dest.stat().st_size / 1e6)
-                    return
+                    why = _looks_like_stub(dest)
+                    if why is None:
+                        log.info(
+                            "yt-dlp SUCCESS via client=%s%s (%s, %.1f MB)",
+                            client, " (with cookies)" if use_cookies else "",
+                            "ranged" if ranged_plan else "whole-file",
+                            dest.stat().st_size / 1e6)
+                        return
+                    # YouTube's silent anti-bot answer: a "successful" file
+                    # with no usable video in it. Same as a bot-block.
+                    last_exc = RuntimeError(
+                        f"client={client} returned an unplayable file ({why})")
+                    log.warning("client=%s returned an unplayable file (%s) — "
+                                "trying next client.", client, why)
+                    break
                 # Downloaded "successfully" but produced nothing usable —
                 # treat as a soft failure and try the next client.
                 log.warning("client=%s produced no file — trying next "
@@ -415,23 +517,35 @@ def _ytdlp_download(url: str, dest: Path,
                         f"Top up the DataImpulse account; parked rows "
                         f"auto-rebuild via proxy_recovery."
                     ) from exc
+                if _is_dead_video(exc):
+                    # Gone/private/geo-locked: no client can fix it. Stop now
+                    # with a clear message so the row is skipped honestly.
+                    log.error("client=%s: video is unavailable — %s",
+                              client, exc)
+                    raise
                 if _is_bot_block(exc):
                     # A bot-gated client is gated ranged or not — move on to
-                    # the next client (staying ranged, i.e. cheap).
+                    # the next client.
                     log.warning("client=%s bot-blocked/no-format — trying "
                                 "next.", client)
                     break
-                if ranged_plan and len(plans) > 1:
+                if len(plans) > 1 and plan_seconds is plans[0]:
+                    # First plan for this client died for some other reason
+                    # (ffmpeg range fetch, size cap, transient) — try the
+                    # other plan on the same client before moving on.
                     log.warning(
-                        "client=%s RANGED download failed (%s) — retrying "
-                        "same client whole-file through the proxy.",
-                        client, exc)
+                        "client=%s %s download failed (%s) — retrying the "
+                        "same client %s.",
+                        client, "RANGED" if ranged_plan else "whole-file",
+                        str(exc)[:160],
+                        "whole-file" if ranged_plan else "ranged")
                     continue
-                # A non-bot error (private/removed/geo video) won't be fixed
-                # by another client. Stop now with a clear message.
-                log.error("client=%s hit a non-recoverable error: %s",
-                          client, exc)
-                raise
+                # Both plans failed on this client. NOT fatal any more: the
+                # old code raised here and killed the whole chain on attempt
+                # #3 (2026-09-11) — rotate to the next client instead.
+                log.warning("client=%s failed (%s) — trying next client.",
+                            client, str(exc)[:160])
+                break
 
     raise RuntimeError(
         f"All YouTube clients failed to download {url}. "

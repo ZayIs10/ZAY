@@ -11,4 +11,6 @@ schedule==1.2.1
 feedparser==6.0.12
 pytrends==4.9.2
 duckduckgo-search==8.1.1
-yt-dlp>=2025.1.0
+yt-dlp>=2026.8.19
+# PO-token provider plugin for yt-dlp (YouTube 403/stub fix, 2026-09-11) — see publisher/pot_provider.py
+bgutil-ytdlp-pot-provider>=2.0.0

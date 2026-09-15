@@ -112,6 +112,14 @@ When blank, it falls back to its existing Pexels-search behavior.
 
 - YouTube watch URLs are not direct mp4 links. The renderer must use
   `yt-dlp` to fetch them at render time.
+- **YouTube needs a PO token (since 2026-09).** Without one every yt-dlp
+  client either has no formats, 403s on the media URL, or returns a
+  217 KB stub file. The build runs the `bgutil-ytdlp-pot-provider`
+  plugin + its Node server (`publisher/pot_provider.py` starts it on
+  demand; the workflows install it; `pip install -U yt-dlp` every run).
+  If downloads regress, run `yt-dlp -v URL 2>&1 | grep pot` — it must
+  show `bgutil:http` retrieving a gvs token. Details: system_map.md
+  "Known traps" → 2026-09-11 entry.
 - DuckDuckGo image search occasionally returns empty results when DDG
   rate-limits the IP. Fallback to Pexels handles this.
 - og:image scraping for brand blogs is best-effort; if a brand redesigns
