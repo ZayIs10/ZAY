@@ -5,7 +5,9 @@
       "parameters": {
         "pollTimes": {
           "item": [
-            { "mode": "everyMinute" }
+            {
+              "mode": "everyMinute"
+            }
           ]
         },
         "documentId": {
@@ -27,7 +29,10 @@
       "name": "Google Sheets Trigger - Row Updated",
       "type": "n8n-nodes-base.googleSheetsTrigger",
       "typeVersion": 1,
-      "position": [220, 300]
+      "position": [
+        220,
+        300
+      ]
     },
     {
       "parameters": {
@@ -41,21 +46,30 @@
           "conditions": [
             {
               "id": "cond_status_ready_to_run",
-              "leftValue": "={{ ($json['Status'] || '').toString().trim().toLowerCase() }}",
+              "leftValue": "={{ ($json['Published'] || '').toString().trim().toLowerCase() }}",
               "rightValue": "ready to run",
-              "operator": { "type": "string", "operation": "equals" }
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
             },
             {
               "id": "cond_has_topic",
               "leftValue": "={{ ($json['Topic'] || '').toString().trim() }}",
               "rightValue": "",
-              "operator": { "type": "string", "operation": "notEmpty" }
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
             },
             {
               "id": "cond_not_carousel",
               "leftValue": "={{ ($json['Post Type'] || '').toString().trim().toLowerCase() }}",
-              "rightValue": "carousel",
-              "operator": { "type": "string", "operation": "notEquals" }
+              "rightValue": "reel",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
             }
           ]
         },
@@ -65,16 +79,34 @@
       "name": "IF - Status is Ready to Run",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [500, 300],
-      "notes": "Only fires when a row's Status == 'Ready to Run' (trimmed, case-insensitive) AND it has a Topic AND its 'Post Type' is NOT 'carousel'. The Post Type filter matters because carousels share this same Reels tab; carousel rows are handled by the separate Carousel Builder workflow. 'Ready to Run' is the single GO signal; it is deliberately different from the terminal 'Ready to Post' so this every-minute trigger can never re-fire a finished reel into a loop."
+      "position": [
+        500,
+        300
+      ],
+      "notes": "Gate reads the VISIBLE 'Published' column (col F) - that is where the user types 'Ready to Run' - plus a Topic and Post Type == reel (carousels have their own builder; motivation rows live on the Motivation tab / Workflow M). Aligned with the live graph 2026-09-15. The build mirrors its final Status back into Published so the gate closes."
     },
     {
       "parameters": {
         "assignments": {
           "assignments": [
-            { "id": "a0", "name": "row_number", "value": "={{ $json.row_number || $json.__row || $itemIndex + 2 }}", "type": "number" },
-            { "id": "a1", "name": "row_index", "value": "={{ $json.row_number || $json.__row || $itemIndex + 2 }}", "type": "string" },
-            { "id": "a2", "name": "topic", "value": "={{ ($json['Topic'] || '').toString().trim() }}", "type": "string" }
+            {
+              "id": "a0",
+              "name": "row_number",
+              "value": "={{ $json.row_number || $json.__row || $itemIndex + 2 }}",
+              "type": "number"
+            },
+            {
+              "id": "a1",
+              "name": "row_index",
+              "value": "={{ $json.row_number || $json.__row || $itemIndex + 2 }}",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "topic",
+              "value": "={{ ($json['Topic'] || '').toString().trim() }}",
+              "type": "string"
+            }
           ]
         },
         "options": {}
@@ -83,7 +115,10 @@
       "name": "Set - Extract Row Fields",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [760, 300],
+      "position": [
+        760,
+        300
+      ],
       "notes": "Pull the sheet row number (1-indexed) so the build worker knows which row to render. The Topic is carried only for the failure-email and logs; the Python build re-reads everything it needs from the sheet itself."
     },
     {
@@ -101,10 +136,12 @@
         },
         "columns": {
           "mappingMode": "defineBelow",
-          "matchingColumns": ["row_number"],
+          "matchingColumns": [
+            "row_number"
+          ],
           "value": {
             "row_number": "={{ $json.row_number }}",
-            "Status": "Building"
+            "Published": "Building"
           }
         },
         "options": {}
@@ -113,8 +150,11 @@
       "name": "Sheets - Claim (Building)",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.4,
-      "position": [1020, 300],
-      "notes": "Loop guard: flip Status off 'Ready to Run' to 'Building' the moment we start, so the every-minute trigger can't fire a duplicate build while this one runs. The GitHub render worker sets the final Status ('Ready to Post' on success, 'Skipped - No Video' if no real clip is found, 'Render Failed' on error)."
+      "position": [
+        1020,
+        300
+      ],
+      "notes": "Loop guard: flip the visible Published column (the one the IF gate reads) off 'Ready to Run' to 'Building' the moment we start, so the every-minute trigger can't re-fire this row while it builds. 2026-09-15: the LIVE node had drifted to mappingMode=autoMapInputData, which wrote only row_index/topic and never 'Building' - every build-side sheet write re-dispatched the same row (5 duplicate runs in 30 s). Must be defineBelow. The GitHub render worker sets the final Status AND mirrors it into Published ('Ready to Post' / 'Skipped - No Video' / 'Render Failed')."
     },
     {
       "parameters": {
@@ -125,9 +165,18 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Accept", "value": "application/vnd.github+json" },
-            { "name": "X-GitHub-Api-Version", "value": "2022-11-28" },
-            { "name": "User-Agent", "value": "n8n-tweet-card-reel" }
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            },
+            {
+              "name": "User-Agent",
+              "value": "n8n-tweet-card-reel"
+            }
           ]
         },
         "sendBody": true,
@@ -139,10 +188,16 @@
       "name": "HTTP - Trigger Render Worker",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [1300, 300],
+      "position": [
+        1300,
+        300
+      ],
       "onError": "continueErrorOutput",
       "credentials": {
-        "githubApi": { "id": "UHXtn1G7d8EMqfMh", "name": "GitHub account 2" }
+        "githubApi": {
+          "id": "UHXtn1G7d8EMqfMh",
+          "name": "GitHub account 2"
+        }
       },
       "notes": "Fire the build-tweet-card-reel GitHub Action via repository_dispatch. The cloud worker does EVERYTHING else: self-finds media (keyless yt-dlp + brand scrape, demo-footage-first), REQUIRES a real video clip (skips the post if none is found - no still), renders the reel, uploads to Drive, and writes the final Status + Reel MP4 URL back to this row. AUTH: the PAT lives in the n8n 'githubApi' credential (GitHub account 2), NOT in a header and NOT in $env — this Hostinger host silently blocks {{ $env.X }}, and a hardcoded 'Bearer ghp_...' here rots the day the token expires (it did, 2026-08-02..08-06: every dispatch 401'd 'Bad credentials' and no reel built for 4 days). Rotate the token in ONE place: that credential."
     },
@@ -160,30 +215,69 @@
       "name": "Gmail - Notify Dispatch Failed",
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
-      "position": [1580, 420],
+      "position": [
+        1580,
+        420
+      ],
       "notes": "Only fires if the GitHub dispatch HTTP call itself errors (bad PAT, repo typo, GitHub down). A normal build that ends in 'Skipped - No Video' is NOT a dispatch failure and will not email."
     }
   ],
   "connections": {
     "Google Sheets Trigger - Row Updated": {
-      "main": [[{ "node": "IF - Status is Ready to Run", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "IF - Status is Ready to Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "IF - Status is Ready to Run": {
       "main": [
-        [{ "node": "Set - Extract Row Fields", "type": "main", "index": 0 }],
+        [
+          {
+            "node": "Set - Extract Row Fields",
+            "type": "main",
+            "index": 0
+          }
+        ],
         []
       ]
     },
     "Set - Extract Row Fields": {
-      "main": [[{ "node": "Sheets - Claim (Building)", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Sheets - Claim (Building)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Sheets - Claim (Building)": {
-      "main": [[{ "node": "HTTP - Trigger Render Worker", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "HTTP - Trigger Render Worker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "HTTP - Trigger Render Worker": {
       "main": [
         [],
-        [{ "node": "Gmail - Notify Dispatch Failed", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Gmail - Notify Dispatch Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     }
   },

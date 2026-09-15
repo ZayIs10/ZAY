@@ -408,6 +408,11 @@ that side's run.
   because n8n's claim node overwrites it with `"Building"` BEFORE dispatching —
   `tweet_card_reel.run()` guards on the durable `Reel MP4 URL` instead and
   refuses to re-render without `--force`.
+  **Recurred 2026-09-15:** live gate now reads `Published` (user's visible
+  column) but the live claim node had drifted to `autoMapInputData` and never
+  wrote "Building" there → 5 dispatches in 30 s. Fixed live (defineBelow,
+  Published="Building") and mirrored into the committed JSON. Tell-tale:
+  Published still "Ready to Run" after a green claim-node execution.
 - **NEVER set `http_proxy`/`https_proxy` in `os.environ`** — breaks Google
   Sheets auth; scope any proxy to the specific downloader
 - **Pexels clips crash HyperFrames** unless re-encoded with
