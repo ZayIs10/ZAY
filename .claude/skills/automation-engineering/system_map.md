@@ -193,6 +193,14 @@ Verified 2026-07-04. When an automation changes shape, update THIS file.
   "no unreviewed auto-posting" rule still holds; approval is one word.
   Capped at ONE reel/day; the IG API cannot schedule (any
   `scheduled_publish_time` posts instantly), so the cron IS the scheduler.
+- **Never silent (2026-09-16):** the same workflow has a SECOND cron
+  `0 7 * * *` (3:00 PM MYT) that runs `publish_due_reels.py --heads-up`:
+  read-only, emails "PLANNED: <topic> publishes at <slot>" (tab, row, Drive
+  link, caption, queue order, token WARNING if dead); no queue = no email.
+  The 3:00 AM publish run then emails "PUBLISHED on Instagram" + post URL.
+  Mode is decided from `github.event.schedule` (step "Decide mode");
+  manual runs take `mode` = publish / heads-up / dry-run. Email matrix in
+  `publisher/workflows/publish_instagram_post.md` → "Notification emails".
 - **Container retry:** `.github/workflows/publish_reel_container.yml` →
   `publisher/publish_reel.py --container-id` (`--check-only` to probe)
 - **Cross-post:** YT Shorts + IG Reels; handle is `@genzcapital` only

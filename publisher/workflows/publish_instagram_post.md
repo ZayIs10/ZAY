@@ -36,6 +36,27 @@ Publish finalized image + caption to Instagram and update Google Sheets status.
 - Duplicate publish risk: if row already `Published`, do not republish unless explicitly forced.
 
 
+## Notification emails (never a silent publish — 2026-09-16)
+
+The Reels tab and the Motivation tab share ONE scheduler
+(`.github/workflows/publish_due_reels.yml` → `publisher/publish_due_reels.py`,
+one post per day total, Reels rows before Motivation rows). The user cannot
+watch a 3 AM cron, so every planned post produces emails, all via
+`publisher/notify_email.py` (Gmail SMTP secrets `GMAIL_ADDRESS` /
+`GMAIL_APP_PASSWORD`, recipient `NOTIFY_TO`):
+
+| When (MYT) | Cron (UTC) | Mode | Email | Writes sheet? |
+|---|---|---|---|---|
+| 3:00 PM | `0 7 * * *` | `--heads-up` | `[GenZ] PLANNED: <topic> publishes to Instagram at <slot>` — tab, row, Drive link, caption, and the rest of the queue; says how to stop it (clear "Publish"). If the token is dead the subject becomes `[GenZ WARNING] Instagram token is DEAD — …` so there are 12 h to fix it. **No queue = no email.** | No |
+| 3:00 AM | `0 19 * * *` | publish | `[GenZ] PUBLISHED on Instagram: <topic>` + post URL after a successful post; `[GenZ ALERT] … failed to publish` on a per-row failure; `[GenZ ALERT] Instagram token EXPIRED` when the pre-flight fails. | Yes |
+| any | job crash | either | `[GenZ ALERT] 3am MYT publish run FAILED` / `… 3pm MYT heads-up run FAILED` from the workflow's `if: failure()` step. | No |
+
+The workflow reads `github.event.schedule` to tell the two crons apart; the
+manual "Run workflow" button has a `mode` input (`publish` / `heads-up` /
+`dry-run`). `--dry-run` lists the queue and sends nothing (used for tests).
+The slot time in the emails is computed from `PUBLISH_UTC_HOUR` in
+`publish_due_reels.py` — change both that constant and the cron together.
+
 ## Access token (the thing that actually breaks publishing)
 
 Meta long-lived user tokens last **60 days**. The one in the

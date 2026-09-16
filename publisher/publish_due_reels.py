@@ -35,9 +35,23 @@ expired, we re-create a fresh container from the Drive MP4 URL (column
 "Reel MP4 URL"), wait for it to finish processing, then publish. Robust and
 idempotent: a row already "Published" is skipped.
 
+WHY IT EMAILS BEFORE *AND* AFTER (2026-09-16)
+-------------------------------------------
+The Reels tab and the Motivation tab both feed this ONE scheduler, and the
+user cannot watch a 3 AM cron. So the run is never silent:
+  * HEADS-UP (--heads-up, cron at 07:00 UTC = 3:00 PM MYT, 12 h ahead):
+    "this reel is PLANNED to publish tonight at 3:00 AM MYT" — which tab,
+    which row, the Drive link, the caption, and what else is queued behind
+    it. Read-only: nothing is written to the sheet. If the token is dead it
+    says so NOW, while there is still time to fix it. No queue = no email.
+  * CONFIRMATION (after a real publish): "PUBLISHED on Instagram" + post URL.
+    Together with the existing failure alerts, every planned post ends in
+    exactly one of: published-email, failed-email, or the token-dead email.
+
 Run:
     python publisher/publish_due_reels.py            # publish ONE due reel (the default)
-    python publisher/publish_due_reels.py --dry-run  # list due reels, post nothing
+    python publisher/publish_due_reels.py --heads-up # email what is PLANNED tonight, post nothing
+    python publisher/publish_due_reels.py --dry-run  # list due reels, post nothing, no email
     python publisher/publish_due_reels.py --limit 0  # no cap — publish ALL due reels
 """
 
@@ -48,7 +62,7 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -75,6 +89,39 @@ FAILED_STATUS = "Publish Failed"    # publish attempt errored — left for retry
 # on the user's screen. The user may type "Publish" in either; accept both and
 # mirror every final status into col F when it's being used as a reel status
 # (same rule as tweet_card_reel._set_status, 2026-08-02 gate-drift lesson).
+# The publish cron (publish_due_reels.yml): 19:00 UTC daily = 03:00 MYT.
+# Kept here so the emails state the real slot instead of a hard-coded phrase.
+PUBLISH_UTC_HOUR = 19
+_MYT = timezone(timedelta(hours=8), "MYT")
+
+
+def next_publish_slot(now: datetime | None = None) -> datetime:
+    """The next 19:00 UTC strictly after `now` (UTC-aware)."""
+    now = now or datetime.now(timezone.utc)
+    slot = now.replace(hour=PUBLISH_UTC_HOUR, minute=0, second=0, microsecond=0)
+    if slot <= now:
+        slot += timedelta(days=1)
+    return slot
+
+
+def _clock(dt: datetime) -> str:
+    """'3:00 AM' — %I keeps a leading zero on every platform, so strip it."""
+    return dt.strftime("%I:%M %p").lstrip("0")
+
+
+def _slot_label(slot: datetime) -> str:
+    """'Wed 17 Sep 2026, 3:00 AM MYT (9:00 PM Europe, 19:00 UTC)'."""
+    myt = slot.astimezone(_MYT)
+    europe = ""
+    try:
+        from zoneinfo import ZoneInfo  # tzdata may be missing on some hosts
+        europe = f"{_clock(slot.astimezone(ZoneInfo('Europe/Berlin')))} Europe, "
+    except Exception:  # noqa: BLE001 — cosmetic
+        pass
+    return (f"{myt.strftime('%a %d %b %Y')}, {_clock(myt)} MYT "
+            f"({europe}{slot.strftime('%H:%M')} UTC)")
+
+
 LEGACY_STATUS_HEADER = "Published"
 _REEL_STATUS_WORDS = {
     "ready to run", "building", "ready to post", "draft", "render failed",
@@ -125,6 +172,7 @@ def _find_due_rows(ws) -> list[dict]:
         approved = APPROVED_STATUS in (status, legacy)
         if approved and mp4 and already != "published":
             row["_row_index"] = i
+            row["_tab"] = getattr(ws, "title", "") or ""
             due.append(row)
     return due
 
@@ -219,6 +267,8 @@ def publish_one(ws, row: dict, ig_user_id: str, access_token: str,
     _write(ws, row_index, "Post URL", permalink)
     _write(ws, row_index, "Published Date", now)
     _set_status(ws, row_index, PUBLISHED_STATUS)
+    row["_permalink"] = permalink or f"media id {media_id}"
+    row["_published_at"] = now
     log.info("Row %d PUBLISHED -> %s", row_index, permalink or media_id)
     return True
 
@@ -283,10 +333,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true",
                         help="List due reels but publish nothing.")
+    parser.add_argument("--heads-up", action="store_true",
+                        help="Email what is PLANNED for the next publish slot "
+                             "(tab, row, caption, queue) and post nothing. "
+                             "Read-only; sends nothing when the queue is empty.")
     parser.add_argument("--limit", type=int, default=1,
                         help="Max reels to publish this run. Default 1 = one post "
                              "per day; pass 0 for no cap (publish all due reels).")
     args = parser.parse_args()
+    if args.heads_up:
+        args.dry_run = True  # a heads-up never posts
 
     load_dotenv(REPO_ROOT / ".env")
     access_token = os.getenv("INSTAGRAM_ACCESS_TOKEN")
@@ -299,12 +355,16 @@ def main() -> int:
         return 1
 
     alive, reason = _token_alive(access_token)
-    if not alive:
+    if not alive and not args.heads_up:
         log.error("Instagram token is DEAD — aborting before touching any row: %s",
                   reason)
         if not args.dry_run:
             _alert_token_dead(reason)
         return 2
+    if not alive:
+        # Heads-up mode keeps going: the whole point is to warn 12 h early.
+        log.error("Instagram token is DEAD — tonight's publish WILL fail: %s",
+                  reason)
 
     from publisher.post_generator import SheetsReader  # late import: needs gspread
 
@@ -327,7 +387,15 @@ def main() -> int:
         due += [(ws, row) for row in _find_due_rows(ws)]
 
     if not due:
-        log.info("No approved reels (no row says 'Publish'). Nothing to post.")
+        log.info("No approved reels (no row says 'Publish'). Nothing to post%s.",
+                 " — no heads-up email" if args.heads_up else "")
+        return 0
+
+    if args.heads_up:
+        rows = [row for _ws, row in due]
+        tonight = rows[: args.limit] if args.limit else rows
+        _send_heads_up(tonight, rows[len(tonight):],
+                       token_problem="" if alive else reason)
         return 0
 
     if args.limit and len(due) > args.limit:
@@ -337,13 +405,20 @@ def main() -> int:
     log.info("%d reel(s) due for publishing.", len(due))
     ok = 0
     failed: list[str] = []
+    published: list[dict] = []
     for ws, row in due:
         if publish_one(ws, row, ig_user_id, access_token, dry_run=args.dry_run):
             ok += 1
+            published.append(row)
         else:
             failed.append((row.get("Topic") or f"row {row['_row_index']}").strip())
     log.info("Done. %d/%d published%s.", ok, len(due),
              " (dry run)" if args.dry_run else "")
+
+    # Confirmation: the user asked (2026-09-16) never to have to guess whether
+    # a planned reel actually went live. Best-effort; dry runs never email.
+    if published and not args.dry_run:
+        _send_published(published)
 
     # If any reel failed to publish, email the user so a stranded reel is never
     # silent. Best-effort — a notify failure must not change the exit behavior.
@@ -354,6 +429,96 @@ def main() -> int:
         _alert_failures(failed, ok, len(due))
 
     return 0
+
+
+def _describe(row: dict, *, with_caption: bool) -> str:
+    """One queued reel, for the emails: tab/row/topic/Drive link (+ caption)."""
+    topic = (row.get("Topic") or "").strip() or "(no topic)"
+    tab = row.get("_tab") or "?"
+    kind = "Motivation speech reel" if tab.lower().startswith("motiv") else "Reel"
+    lines = [
+        f"{topic}",
+        f"  Tab: {tab} (row {row.get('_row_index')})  ·  Type: {kind}",
+        f"  Video: {(row.get('Reel MP4 URL') or '').strip() or '(no Drive link)'}",
+    ]
+    if with_caption:
+        cap = (row.get("Post Caption") or "").strip() or "(no caption in sheet)"
+        lines += ["  Caption that will be posted:", "  " + cap.replace("\n", "\n  ")]
+    return "\n".join(lines)
+
+
+def _send_heads_up(tonight: list[dict], later: list[dict], *,
+                   token_problem: str = "") -> None:
+    """Email: these reels are PLANNED to publish at the next slot.
+
+    Sent by the 3:00 PM MYT run — 12 h before the 3:00 AM MYT publish — so
+    the user knows in advance what will go live and can still pull a row
+    (delete the word "Publish") if they change their mind. Read-only.
+    """
+    try:
+        from publisher.notify_email import send  # late import
+        when = _slot_label(next_publish_slot())
+        n = len(tonight)
+        first = (tonight[0].get("Topic") or "").strip() if tonight else ""
+        subject = (f"[GenZ] PLANNED: {first} publishes to Instagram at {when}"
+                   if n == 1 else
+                   f"[GenZ] PLANNED: {n} reels publish to Instagram at {when}")
+        if token_problem:
+            subject = "[GenZ WARNING] Instagram token is DEAD — " + subject[7:]
+        parts = [
+            f"PLANNED INSTAGRAM PUBLISH — {when}",
+            "=" * 60,
+            "Nothing has been posted yet. This is the 12-hour heads-up from the",
+            "scheduler: at the time above it will publish the reel(s) below",
+            "(one per day, top row first; Reels tab before Motivation tab).",
+            "",
+            "To STOP a reel from going out: open the sheet and clear the word",
+            "\"Publish\" from that row before the time above. To let it run: do",
+            "nothing. You will get a second email once it is actually live.",
+            "",
+        ]
+        if token_problem:
+            parts += [
+                "!! WARNING: the Instagram token is INVALID right now, so tonight's",
+                f"!! publish WILL FAIL unless it is replaced first: {token_problem}",
+                "!! Fix: publisher/workflows/publish_instagram_post.md -> Access token.",
+                "",
+            ]
+        parts += ["GOING LIVE AT THAT TIME:", "-" * 60]
+        parts += [_describe(r, with_caption=True) + "\n" for r in tonight]
+        if later:
+            parts += ["QUEUED FOR THE FOLLOWING DAYS (one per day, in this order):",
+                      "-" * 60]
+            parts += [f"{i}. " + _describe(r, with_caption=False).replace(
+                "\n", "\n   ") for i, r in enumerate(later, start=1)]
+        send(subject, "\n".join(parts) + "\n")
+        log.info("Heads-up email sent (%d tonight, %d queued later).", n, len(later))
+    except Exception as exc:  # noqa: BLE001 — a notify failure must never crash
+        log.warning("Could not send heads-up email: %s", exc)
+
+
+def _send_published(published: list[dict]) -> None:
+    """Email: the planned reel(s) are now LIVE on Instagram (with the URL)."""
+    try:
+        from publisher.notify_email import send  # late import
+        n = len(published)
+        first = (published[0].get("Topic") or "").strip()
+        subject = (f"[GenZ] PUBLISHED on Instagram: {first}" if n == 1
+                   else f"[GenZ] PUBLISHED on Instagram: {n} reels")
+        parts = ["The scheduled publish ran and these reels are LIVE:", ""]
+        for r in published:
+            parts += [
+                _describe(r, with_caption=False),
+                f"  Instagram: {r.get('_permalink', '')}",
+                f"  Published at: {r.get('_published_at', '')} (UTC)",
+                "",
+            ]
+        parts += ["The sheet row(s) now say \"Published\" with the post URL and",
+                  "date. Nothing else is needed."]
+        send(subject, "\n".join(parts) + "\n")
+        log.info("Published-confirmation email sent (%d reel(s)).", n)
+    except Exception as exc:  # noqa: BLE001 — never fail a successful publish
+        log.warning("Could not send published-confirmation email: %s", exc)
 
 
 def _alert_failures(failed: list[str], ok: int, total: int) -> None:

@@ -112,6 +112,8 @@ def build_review_email(
         "automatically at 3:00 AM MYT (Europe evening peak) — one\n"
         "queued reel per day, top row first — and the row flips to\n"
         "Published. Not happy? Just leave it; nothing posts on its own.\n"
+        "You will get a PLANNED email at 3:00 PM MYT the day it is due\n"
+        "(12 h before) and a PUBLISHED email with the link once it is live.\n"
     )
 
     body = (
