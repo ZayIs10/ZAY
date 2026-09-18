@@ -72,7 +72,12 @@ jobs:
       # Only the Sheets stack is needed — no ffmpeg, no yt-dlp, no Pillow.
       # Keeping this narrow is what makes the job ~30 s instead of ~3 min.
       - name: Install Sheets dependencies
-        run: pip install gspread==6.1.2 google-auth python-dotenv
+        # Pillow is here only because stuck_row_recovery imports status
+        # constants from tweet_card_reel, which imports the card renderer.
+        # It is NOT used to render anything in this job. `openai` is
+        # deliberately absent: post_generator imports it lazily so sheet-only
+        # tools stay light (its first run died on exactly that import).
+        run: pip install gspread==6.1.2 google-auth python-dotenv Pillow
 
       - name: Restore Google service account
         env:

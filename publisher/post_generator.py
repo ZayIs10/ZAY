@@ -19,13 +19,21 @@ import re
 import sys
 import time
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 import gspread
 import requests
 from dotenv import load_dotenv
 from google.oauth2.service_account import Credentials
-from openai import OpenAI
 from PIL import Image, ImageDraw, ImageFont
+
+# `openai` is imported lazily (see main()) so that sheet-only tools can import
+# SheetsReader from this module without the AI stack installed. The cloud
+# rescue job (rescue_stuck_reels.yml) is exactly that case: it only reads and
+# writes status cells, and it died with ModuleNotFoundError: No module named
+# 'openai' on its first run because this import sat at the top level.
+if TYPE_CHECKING:  # annotations only — never imported at runtime
+    from openai import OpenAI
 try:  # works when run as a module from the repo root (CI / n8n / pipeline)
     from publisher.usage_guard import UsageGuard, UsageLimitError
 except ModuleNotFoundError:  # works when run directly from inside publisher/
@@ -327,7 +335,7 @@ class SheetsReader:
 # ---------------------------------------------------------------------------
 
 class CaptionGenerator:
-    def __init__(self, config: dict, client: OpenAI, usage_guard: UsageGuard | None = None):
+    def __init__(self, config: dict, client: "OpenAI", usage_guard: UsageGuard | None = None):
         self.client = client
         self.model = config["openai"]["model"]
         self.temperature = config["openai"]["temperature"]
@@ -399,7 +407,7 @@ class CaptionGenerator:
 # ---------------------------------------------------------------------------
 
 class ImageGenerator:
-    def __init__(self, config: dict, client: OpenAI, usage_guard: UsageGuard | None = None):
+    def __init__(self, config: dict, client: "OpenAI", usage_guard: UsageGuard | None = None):
         self.client = client
         self.cfg = config["openai"]
         self.usage_guard = usage_guard
@@ -1012,6 +1020,8 @@ def main():
     topic = row.get("Topic", "untitled")
     logging.info(f"Processing topic: {topic}")
     sheets.mark_in_progress(row_index)
+
+    from openai import OpenAI  # lazy: only the publish path needs it
 
     client = OpenAI(api_key=config["openai"]["api_key"])
     usage_guard = UsageGuard.from_env(config["output_dir"])
