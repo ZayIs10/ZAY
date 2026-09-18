@@ -256,8 +256,14 @@ class SheetsReader:
         creds = Credentials.from_service_account_file(
             creds_path, scopes=self.SCOPES)
         self.gc = gspread.authorize(creds)
-        sh = self.gc.open_by_key(self.cfg["spreadsheet_id"])
-        self.ws = _RetryingWorksheet(sh.worksheet(self.cfg["sheet_name"]))
+        # Opening the sheet is itself two API reads, and they ran UNPROTECTED
+        # until 2026-09-18: one Google [503] here killed the whole 3 AM
+        # publish run on 9-Sep before a single row was looked at. The proxy is
+        # generic (it only wraps callables), so it guards the client and the
+        # spreadsheet exactly as it guards the worksheet.
+        sh = _RetryingWorksheet(self.gc).open_by_key(self.cfg["spreadsheet_id"])
+        self.ws = _RetryingWorksheet(
+            _RetryingWorksheet(sh).worksheet(self.cfg["sheet_name"]))
         self._headers: list[str] | None = None
         self._headers_refreshed = False
 
