@@ -10,20 +10,34 @@ only works for Facebook Pages, not IG.)
 So GitHub does the scheduling instead — WITH a human review gate (2026-08-07):
 
   build → "Ready to Post" (+ review email)   ← rendered, waiting for the user
-  user types "Publish"                        ← approved, queued
+  user types "Approved"                       ← approved, queued
   daily cron posts ONE per day, top-down     → "Published"
 
 The reel build renders the video, uploads it to Drive, emails the review link,
 and leaves the row at Status="Ready to Post". NOTHING publishes until the user
-flips the row to "Publish" (no ED — the ED is earned). The user may type it in
-either the live `Status` column or the visible legacy `Published` column F;
-both are accepted, because Status sits far off-screen and col F is what's
-actually on the user's screen (the 2026-08-02 gate-drift lesson).
+flips the row to "Approved". The user may type it in either the live `Status`
+column or the visible legacy `Published` column F; both are accepted, because
+Status sits far off-screen and col F is what's actually on the user's screen
+(the 2026-08-02 gate-drift lesson).
+
+THE APPROVAL WORD CHANGED 2026-09-18 ("Publish" -> "Approved")
+--------------------------------------------------------------
+The old word was "Publish" — one ED away from the terminal "Published", in the
+SAME column that n8n's build gate reads. That collision bit for real: the live
+Workflow B had an IF node matching Published == "Publish" wired into the BUILD
+path, so typing the approval word dispatched a render, and the claim node then
+wrote "Building" over the cell. The approval vanished about a second after it
+was typed; rows 84 and 85 were approved on 15-Sep and silently never published
+while every nightly run exited green with nothing to do.
+
+"Approved" shares no prefix with "Building" or "Published", so no future gate
+can confuse them. "Publish" is STILL ACCEPTED so rows approved before the
+change keep working — only what we ASK for changed, never what we understand.
 
 This script runs on a daily GitHub Actions cron at 19:00 UTC = 3:00 AM MYT =
 8-9 PM Central Europe (the target audience's evening peak — see the Europe
 pivot, 2026-08-07). By DEFAULT it publishes ONE approved reel per run = one
-post per day. If several rows say "Publish" they drain one-per-day, top-down:
+post per day. If several rows say "Approved" they drain one-per-day, top-down:
 row 69 today, row 70 tomorrow, and so on. (--limit 0 publishes all in one run.)
 
 WHY IT RE-CREATES THE CONTAINER
@@ -80,7 +94,21 @@ log = logging.getLogger("publish_due_reels")
 # Status values — extend tweet_card_reel.py's state machine with a review gate.
 # "Ready to Post" now means "rendered, awaiting the user's review" and is NOT
 # picked up here. Only the user's explicit approval word queues a publish.
-APPROVED_STATUS = "publish"         # typed by the USER: approved, queue it
+# The approval word the user types. Changed from "Publish" to "Approved" on
+# 2026-09-18 after a real collision: the live n8n Workflow B had an IF node
+# gating on Published == "Publish" wired into the BUILD path, so typing the
+# approval word fired a render AND the claim node overwrote the cell with
+# "Building" — erasing the approval about a second after it was typed. Rows 84
+# and 85 were approved on 15-Sep and never published; the nightly run kept
+# exiting green with nothing to do.
+#
+# "Approved" shares no prefix with "Building" or "Published", so no gate or
+# status check can confuse them again. "publish" is still ACCEPTED (below) so
+# any row the user already typed keeps working — the word only changed for
+# what we ASK for, never for what we understand.
+APPROVED_STATUS = "approved"        # typed by the USER: approved, queue it
+LEGACY_APPROVED_STATUS = "publish"  # still honoured: pre-2026-09-18 rows
+APPROVED_WORDS = frozenset({APPROVED_STATUS, LEGACY_APPROVED_STATUS})
 PUBLISHED_STATUS = "Published"      # terminal: live on Instagram
 FAILED_STATUS = "Publish Failed"    # publish attempt errored — left for retry/inspection
 
@@ -126,7 +154,8 @@ LEGACY_STATUS_HEADER = "Published"
 _REEL_STATUS_WORDS = {
     "ready to run", "building", "ready to post", "draft", "render failed",
     "proxy empty - retry", "skipped - no video",
-    APPROVED_STATUS, PUBLISHED_STATUS.lower(), FAILED_STATUS.lower(),
+    APPROVED_STATUS, LEGACY_APPROVED_STATUS,
+    PUBLISHED_STATUS.lower(), FAILED_STATUS.lower(),
 }
 
 
@@ -153,10 +182,11 @@ def _motivation_config() -> dict | None:
 
 
 def _find_due_rows(ws) -> list[dict]:
-    """Return every row the user approved: 'Publish' (trimmed, case-insensitive)
-    in the live Status column OR the visible legacy col F, with a usable
-    Reel MP4 URL and not already published. Sheet order = queue order, so the
-    top-most approved row goes out first (row 69 today, row 70 tomorrow...)."""
+    """Return every row the user approved: 'Approved' (or the pre-2026-09-18
+    'Publish'), trimmed and case-insensitive, in the live Status column OR the
+    visible legacy col F, with a usable Reel MP4 URL and not already published.
+    Sheet order = queue order, so the top-most approved row goes out first
+    (row 69 today, row 70 tomorrow...)."""
     all_values = ws.get_all_values()
     if not all_values:
         return []
@@ -169,7 +199,7 @@ def _find_due_rows(ws) -> list[dict]:
         legacy = str(row.get(LEGACY_STATUS_HEADER, "")).strip().lower()
         already = str(row.get("Instagram Post", "")).strip().lower()
         mp4 = str(row.get("Reel MP4 URL", "")).strip()
-        approved = APPROVED_STATUS in (status, legacy)
+        approved = bool(APPROVED_WORDS & {status, legacy})
         if approved and mp4 and already != "published":
             row["_row_index"] = i
             row["_tab"] = getattr(ws, "title", "") or ""
@@ -318,7 +348,7 @@ def _alert_token_dead(reason: str) -> None:
             "[GenZ ALERT] Instagram token EXPIRED — auto-publish is STOPPED",
             "The 3am MYT auto-publish run aborted before touching any row.\n\n"
             f"Reason: {reason}\n\n"
-            "Approved rows are left as 'Publish' and will go out automatically "
+            "Approved rows are left as 'Approved' and will go out automatically "
             "once the token is fixed. To fix: generate a new long-lived token "
             "for app 'Gen Z publisher' (989601526736983), then update the "
             "INSTAGRAM_ACCESS_TOKEN GitHub secret. See "
@@ -387,7 +417,7 @@ def main() -> int:
         due += [(ws, row) for row in _find_due_rows(ws)]
 
     if not due:
-        log.info("No approved reels (no row says 'Publish'). Nothing to post%s.",
+        log.info("No approved reels (no row says 'Approved'). Nothing to post%s.",
                  " — no heads-up email" if args.heads_up else "")
         return 0
 
@@ -453,7 +483,7 @@ def _send_heads_up(tonight: list[dict], later: list[dict], *,
 
     Sent by the 3:00 PM MYT run — 12 h before the 3:00 AM MYT publish — so
     the user knows in advance what will go live and can still pull a row
-    (delete the word "Publish") if they change their mind. Read-only.
+    (delete the word "Approved") if they change their mind. Read-only.
     """
     try:
         from publisher.notify_email import send  # late import
@@ -473,7 +503,7 @@ def _send_heads_up(tonight: list[dict], later: list[dict], *,
             "(one per day, top row first; Reels tab before Motivation tab).",
             "",
             "To STOP a reel from going out: open the sheet and clear the word",
-            "\"Publish\" from that row before the time above. To let it run: do",
+            "\"Approved\" from that row before the time above. To let it run: do",
             "nothing. You will get a second email once it is actually live.",
             "",
         ]
@@ -534,7 +564,7 @@ def _alert_failures(failed: list[str], ok: int, total: int) -> None:
             "These rows are now marked 'Publish Failed' in the sheet — they "
             "will NOT auto-retry. Open the sheet to see the error in the "
             "'Instagram Post' column. To retry, set the row back to "
-            "'Publish' and it'll go out at the next 3am MYT run.\n"
+            "'Approved' and it'll go out at the next 3am MYT run.\n"
         )
         send(subject, body)
         log.info("Failure-alert email sent (%d failed).", len(failed))

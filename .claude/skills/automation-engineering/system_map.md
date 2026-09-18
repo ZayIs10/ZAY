@@ -184,8 +184,9 @@ Verified 2026-07-04. When an automation changes shape, update THIS file.
   Europe (the target audience since the Europe geo pivot; India asleep) →
   `publisher/check_ig_token.py` then `publisher/publish_due_reels.py`.
 - **State machine:** build → `Ready to Post` (+ review email with Drive link,
-  caption, and "type Publish" instructions) → USER types `Publish` (accepted
-  in the live `Status` column OR the visible legacy col F `Published`) →
+  caption, and "type Approved" instructions) → USER types `Approved` (accepted
+  in the live `Status` column OR the visible legacy col F `Published`; the old
+  `Publish` is still honoured for pre-2026-09-18 rows) →
   cron posts ONE approved reel per day, TOP-DOWN in sheet order → row flips
   to `Published` (both columns mirrored) + Post URL + Published Date.
   Failure → `Publish Failed` + alert email, NO auto-retry (set back to
@@ -316,7 +317,52 @@ that side's run.
 - Status words are the state machine — a distinct trigger word
   (`Ready to Run`) vs done word (`Ready to Post`) prevents duplicate renders
 
+## Stuck-row rescue (cloud, laptop-independent)
+
+- **Trigger:** `.github/workflows/rescue_stuck_reels.yml` — cron every 4 h
+  (`15 */4 * * *`) on **ubuntu-latest**, plus `workflow_dispatch`
+  (`dry_run`, `stale_minutes` inputs)
+- **Entry:** `python publisher/stuck_row_recovery.py`
+- **Why cloud:** it ONLY reads/writes the sheet — no download, no render — so
+  it needs no proxy and keeps working while the laptop is asleep, which is
+  exactly when rows get stranded. (Rendering still must be the PC: YouTube
+  bot-blocks datacenter IPs.)
+- **Logic:** a row at `Building` for > 60 min → back to `Ready to Run`
+  (attempt cap 3, then `Render Failed`). Sweeps BOTH tabs and BOTH status
+  columns (n8n's claim writes `Building` into `Published`, the build writes it
+  into `Status`). Attempt counter is embedded in `Media Status` as
+  `[requeue n=<n> since=<iso>]` — no new column. A row whose age can't be
+  determined is stamped, not touched, so a live render is never stolen.
+
 ## Known traps (confirm before re-applying an old fix)
+
+- **A self-hosted-runner job that dies leaves the row at `Building` FOREVER
+  (2026-09-18):** the laptop IS the renderer (the cloud path is skipped
+  because the proxy probe fails — all 14 September successes ran on `pc`).
+  When it sleeps mid-build, GitHub records "The self-hosted runner lost
+  communication with the server" with NO log, and the Python that would have
+  written `Render Failed` died on that laptop. `Building` is polled by
+  nothing, so the topic is silently dead. September: 5 runs died this way
+  (each within seconds of a Windows Kernel-Power id=42 sleep event), 9 more
+  were CANCELLED at the 24 h "awaiting a runner" limit. Diagnose with
+  `gh api repos/<repo>/check-runs/<job_id>/annotations` — a failed job with
+  NO downloadable log is the tell. Fixed by the stuck-row rescue above; do
+  NOT "fix" a recurrence by keeping the laptop awake (Windows cannot refuse a
+  user-commanded sleep) — the rescue is the real fix.
+
+- **The approval word collided with the build gate (2026-09-18):** the user's
+  approval word was `Publish`, typed into the SAME column n8n's build gate
+  reads. The live Workflow B had an `If2` node (`Published == "Publish"`)
+  wired into the BUILD path — present live, ABSENT from the committed JSON —
+  so approving a reel dispatched a build AND the claim node overwrote the
+  approval with `Building` about a second later. The dispatch skipped
+  `Set - Extract Row Fields`, so the build failed with "Neither topic nor
+  row_index provided". Rows 84/85 were approved 15-Sep and never published
+  while every nightly run exited green. Fixed: `If2` removed live; approval
+  word is now `Approved` (no shared prefix with `Building`/`Published`);
+  `Publish` still accepted for old rows. **Third occurrence of live-vs-repo
+  n8n drift** — when a gate misfires, always diff the LIVE graph against the
+  committed JSON before touching code.
 
 - **Sheets 429 "Quota exceeded ... Read requests per minute per user":** the
   quota is 60 reads + 60 writes per MINUTE for the WHOLE service account,

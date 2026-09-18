@@ -36,6 +36,60 @@ Publish finalized image + caption to Instagram and update Google Sheets status.
 - Duplicate publish risk: if row already `Published`, do not republish unless explicitly forced.
 
 
+## The approval word is "Approved" (changed 2026-09-18)
+
+To publish a rendered reel, type **`Approved`** on its row — in either the
+live `Status` column or the visible legacy `Published` column F. The 3:00 AM
+MYT cron then posts ONE approved reel per day, top row first.
+
+It used to be `Publish`, and that one word caused a silent outage:
+
+- The LIVE n8n Workflow B had an extra IF node (`If2`, matching
+  `Published == "Publish"`) wired straight into the BUILD path. It was added
+  in the n8n UI and **never existed in the committed JSON** — the same
+  live-vs-repo drift as the 2026-08-02 incident.
+- So typing the approval word (a) dispatched a reel build, and (b) the claim
+  node immediately wrote `Building` over the cell. The approval was erased
+  about a second after it was typed.
+- The dispatch also came from a path that never ran `Set - Extract Row
+  Fields`, so the build got an empty topic and died with
+  `Neither topic nor row_index provided` (runs 34991853412 / 34991853435).
+- Net effect: rows 84 and 85 were approved on 15-Sep and never published,
+  while every nightly run exited GREEN reporting nothing to do.
+
+`Approved` shares no prefix with `Building` or `Published`, so no gate can
+confuse them again. **`Publish` is still accepted** (`LEGACY_APPROVED_STATUS`)
+so older rows keep working — only what we ASK for changed.
+
+Fix applied: `If2` removed from the live workflow; approving a reel can no
+longer start a build. If a build ever starts from an approval again, check the
+LIVE graph against `publisher/workflows/n8n/tweet_card_reel_workflow.json`
+first — the live one is what runs.
+
+## Rows stranded at "Building" (the sleeping-laptop bug, 2026-09-18)
+
+All reel rendering happens on the self-hosted PC (`marc-pc`); the cloud path
+is skipped because the proxy probe fails. When the laptop sleeps mid-build the
+runner dies instantly ("The self-hosted runner lost communication with the
+server", no log), and the Python that would have written `Render Failed` dies
+with it — so the row keeps the claim word `Building` **forever**. Nothing
+polls `Building`: not n8n, not `proxy_recovery.py`, not the build itself.
+
+September evidence: 5 runs died that way (each within seconds of a Windows
+sleep event) and 9 more were cancelled after waiting 24 h for a runner.
+Motivation rows 5 and 7 sat stranded with no MP4 until 2026-09-18.
+
+Fix: `.github/workflows/rescue_stuck_reels.yml` →
+`publisher/stuck_row_recovery.py`, every 4 h on **ubuntu-latest** (it only
+touches the sheet, so it runs while the laptop is off). A row at `Building`
+for more than 60 min goes back to `Ready to Run`, capped at 3 automatic
+attempts, then `Render Failed`. The attempt counter lives inside
+`Media Status` as `[requeue n=<n> since=<iso>]`, so no new column is needed.
+
+Consequence for the user: closing the laptop mid-render is now harmless — the
+row is requeued and builds next time the PC is online. Opening the laptop was
+never the problem; a queued job simply waits for the runner.
+
 ## Notification emails (never a silent publish — 2026-09-16)
 
 The Reels tab and the Motivation tab share ONE scheduler
@@ -47,7 +101,7 @@ watch a 3 AM cron, so every planned post produces emails, all via
 
 | When (MYT) | Cron (UTC) | Mode | Email | Writes sheet? |
 |---|---|---|---|---|
-| 3:00 PM | `0 7 * * *` | `--heads-up` | `[GenZ] PLANNED: <topic> publishes to Instagram at <slot>` — tab, row, Drive link, caption, and the rest of the queue; says how to stop it (clear "Publish"). If the token is dead the subject becomes `[GenZ WARNING] Instagram token is DEAD — …` so there are 12 h to fix it. **No queue = no email.** | No |
+| 3:00 PM | `0 7 * * *` | `--heads-up` | `[GenZ] PLANNED: <topic> publishes to Instagram at <slot>` — tab, row, Drive link, caption, and the rest of the queue; says how to stop it (clear "Approved"). If the token is dead the subject becomes `[GenZ WARNING] Instagram token is DEAD — …` so there are 12 h to fix it. **No queue = no email.** | No |
 | 3:00 AM | `0 19 * * *` | publish | `[GenZ] PUBLISHED on Instagram: <topic>` + post URL after a successful post; `[GenZ ALERT] … failed to publish` on a per-row failure; `[GenZ ALERT] Instagram token EXPIRED` when the pre-flight fails. | Yes |
 | any | job crash | either | `[GenZ ALERT] 3am MYT publish run FAILED` / `… 3pm MYT heads-up run FAILED` from the workflow's `if: failure()` step. | No |
 
@@ -66,7 +120,7 @@ nightly `publish_due_reels` run stayed green while posting nothing for a week
 
 - `publish_due_reels.py` pre-flights the token (`debug_token`) and **aborts
   with exit 2 + a "token EXPIRED" email before touching any row**. Approved
-  rows stay `Publish` and drain automatically once the token is replaced.
+  rows stay `Approved` and drain automatically once the token is replaced.
 - `publish_due_reels.yml` now treats `check_ig_token.py` as a hard gate → a
   dead token is a **red run**, never a green one.
 - `refresh_ig_token.yml` (Mondays 06:00 UTC) exchanges the token for a fresh

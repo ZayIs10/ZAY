@@ -93,22 +93,27 @@ def build_review_email(
 
     REVIEW GATE (2026-08-07): the build renders the reel, uploads it to
     Drive, and emails this review link — NOTHING posts on its own. To
-    publish, the user types "Publish" on the sheet row; the daily 3am MYT
+    publish, the user types "Approved" on the sheet row; the daily 3am MYT
     (Europe evening) run then posts approved rows one per day, top-down,
     and flips each to "Published". (`staged_ok` / `stage_detail` /
     `container_id` / `repo` are kept for signature compatibility but unused.)
+
+    The word changed from "Publish" to "Approved" on 2026-09-18: the live n8n
+    build gate matched on "Publish" and its claim node then overwrote the cell
+    with "Building", erasing the approval seconds after it was typed. The
+    publisher still ACCEPTS "Publish" for rows approved before the change.
     """
-    subject = f"[GenZ reel ready to review — type Publish to queue] {topic}"
+    subject = f"[GenZ reel ready to review — type Approved to queue] {topic}"
 
     caption_block = caption.strip() or "(no caption in sheet)"
 
     ig_block = (
-        "INSTAGRAM: NOT POSTED — REVIEW, THEN TYPE \"Publish\"\n"
+        "INSTAGRAM: NOT POSTED — REVIEW, THEN TYPE \"Approved\"\n"
         "------------------------------------------------------------\n"
         "This reel is rendered and waiting for you. Watch it at the\n"
         "Drive link above; the caption below is what will be posted.\n"
         "Happy with it? Open the sheet and set this row's status to\n"
-        "Publish (either status column works). It then goes live\n"
+        "Approved (either status column works). It then goes live\n"
         "automatically at 3:00 AM MYT (Europe evening peak) — one\n"
         "queued reel per day, top row first — and the row flips to\n"
         "Published. Not happy? Just leave it; nothing posts on its own.\n"
