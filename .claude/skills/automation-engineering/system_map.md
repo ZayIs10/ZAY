@@ -364,6 +364,23 @@ that side's run.
   n8n drift** — when a gate misfires, always diff the LIVE graph against the
   committed JSON before touching code.
 
+- **Workflow M's gate could never pass (found 2026-09-18, FOURTH drift):**
+  the LIVE `IF - Ready to Run` on the Motivation workflow carried two extra
+  UI-added conditions whose left value was the LITERAL text `Published` /
+  `Publish` with operator "does not exist". A literal string always exists,
+  so under AND the gate rejected every row — trigger executions finished
+  "success" in ~20 ms with the row on the FALSE branch, and only manual runs
+  ever built a Motivation reel. The committed JSON was clean. Removed live;
+  verified by rows 5 and 7 dispatching builds. The separate sporadic
+  "Unknown error" trigger executions (14–16 Sep) are transient Google poll
+  errors, not the cause. Tell: a trigger run of ~20 ms = gate said no — open
+  the execution and look at which IF branch the row left on.
+
+- **Sheet OPEN had no retry (fixed 2026-09-18):** `SheetsReader.__init__`
+  called `open_by_key` + `worksheet()` outside `_RetryingWorksheet`, so one
+  Google `[503]` killed the 9-Sep publish run before any row was read. Both
+  calls now go through the same proxy.
+
 - **Sheets 429 "Quota exceeded ... Read requests per minute per user":** the
   quota is 60 reads + 60 writes per MINUTE for the WHOLE service account,
   shared by every automation. n8n fans out one `repository_dispatch` per
