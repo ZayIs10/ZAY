@@ -90,6 +90,18 @@ Consequence for the user: closing the laptop mid-render is now harmless — the
 row is requeued and builds next time the PC is online. Opening the laptop was
 never the problem; a queued job simply waits for the runner.
 
+## Never hand-edit the visible column of a row n8n has claimed
+
+The visible `Published` column is BOTH what you type into and what n8n's gate
+reads. If a row says `Building` and you put a trigger word back into that
+cell, n8n dispatches the row again on its next poll — once a minute. Seen
+2026-09-18 while testing Motivation rows: two duplicate builds fired.
+
+It is not dangerous (the build refuses to re-render a row that already has a
+Reel MP4 URL, and repairs the status to `Ready to Post`), but it wastes the
+laptop's runner. Rule: once a row is `Building`, leave it alone — let the
+build write the next word, or let the 4-hourly rescue job requeue it.
+
 ## Notification emails (never a silent publish — 2026-09-16)
 
 The Reels tab and the Motivation tab share ONE scheduler
