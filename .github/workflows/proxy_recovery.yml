@@ -92,9 +92,28 @@ jobs:
           $py = "$venv\Scripts\python.exe"
           & $py -m pip install --upgrade pip
           & $py -m pip install -r requirements.txt
-          & $py -m pip install yt-dlp
+          # -U + PO-token plugin: same reason as build_tweet_card_reel.yml
+          # (2026-09-11 — stale yt-dlp + no PO token = stubs/403 on every client).
+          & $py -m pip install -U yt-dlp bgutil-ytdlp-pot-provider
           "python=$py" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           Write-Host "Using venv python: $py"
+
+      - name: Install PO-token provider (bgutil server, persistent)
+        # Mirrors build_tweet_card_reel.yml — publisher/pot_provider.py starts
+        # this Node server on demand from C:\actions-runner\bgutil-pot\server.
+        run: |
+          $potHome = "C:\actions-runner\bgutil-pot"
+          if (-not (Test-Path "$potHome\server\build\main.js")) {
+            Write-Host "Cloning + building bgutil PO-token provider ..."
+            if (Test-Path $potHome) { Remove-Item -Recurse -Force $potHome }
+            git clone -q --depth 1 --single-branch --branch 2.0.0 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git $potHome
+            Push-Location "$potHome\server"
+            npm ci --silent
+            npx tsc
+            Pop-Location
+          }
+          if (Test-Path "$potHome\server\build\main.js") { Write-Host "PO-token provider ready at $potHome\server" }
+          else { Write-Host "::warning::PO-token provider build missing — YouTube downloads may 403/stub" }
 
       - name: Write .env
         # OVERWRITE, not append: the self-hosted runner reuses its working

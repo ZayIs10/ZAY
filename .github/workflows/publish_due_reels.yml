@@ -20,21 +20,35 @@ name: Publish Approved Reels (3am MYT / Europe evening)
 # EUROPEAN audience's evening peak (geo pivot, 2026-08-07). India is asleep.
 # (GitHub cron is always UTC and can lag a few minutes under load — fine.)
 #
-# Also runnable manually from the Actions UI (with an optional dry-run).
+# TWO crons, ONE workflow (2026-09-16 — user: "email me so I KNOW it is
+# planned to publish, and that it didn't silently break"):
+#   07:00 UTC = 3:00 PM MYT  HEADS-UP  → `--heads-up`: emails what is PLANNED
+#                            for tonight's slot (tab, row, caption, queue),
+#                            posts nothing, writes nothing. 12 h of warning —
+#                            enough to pull a row or fix a dead token.
+#   19:00 UTC = 3:00 AM MYT  PUBLISH   → posts ONE approved reel, then emails
+#                            "PUBLISHED" + the Instagram URL (or the failure
+#                            alert). The Reels and Motivation tabs share this
+#                            single slot: one post per day total, Reels first.
+# Which cron fired is read from github.event.schedule below.
+#
+# Also runnable manually from the Actions UI (mode: publish / heads-up / dry-run).
 
 "on":
   schedule:
-    - cron: "0 19 * * *"          # 19:00 UTC = 03:00 MYT = Europe evening
+    - cron: "0 7 * * *"           # 07:00 UTC = 15:00 MYT = heads-up email only
+    - cron: "0 19 * * *"          # 19:00 UTC = 03:00 MYT = Europe evening publish
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: "true = list due reels but publish nothing"
+      mode:
+        description: "publish = post now · heads-up = email the plan only · dry-run = list, no post, no email"
         required: false
-        default: "false"
+        default: "publish"
         type: choice
         options:
-          - "false"
-          - "true"
+          - "publish"
+          - "heads-up"
+          - "dry-run"
       limit:
         description: "Max reels to publish (blank = 1/one per day; 0 = all due)"
         required: false
@@ -67,6 +81,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Decide mode (heads-up cron vs publish cron vs manual)
+        id: mode
+        env:
+          EVENT: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          INPUT_MODE: ${{ github.event.inputs.mode }}
+        run: |
+          MODE="publish"
+          if [ "$EVENT" = "schedule" ] && [ "$SCHEDULE" = "0 7 * * *" ]; then
+            MODE="heads-up"
+          elif [ "$EVENT" = "workflow_dispatch" ] && [ -n "$INPUT_MODE" ]; then
+            MODE="$INPUT_MODE"
+          fi
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "Run mode: $MODE (event=$EVENT schedule='$SCHEDULE')"
+
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -98,17 +128,22 @@ jobs:
         # so the run stayed GREEN while publishing nothing for a week. Now a
         # dead token = red run + the failure-alert email, and the publish step
         # never runs (rows stay "Publish", not "Publish Failed").
+        # Skipped in heads-up mode: the script checks the token itself there
+        # and puts a WARNING in the heads-up email instead of a red run —
+        # the 3 AM publish run is the one that must go red.
+        if: steps.mode.outputs.mode != 'heads-up'
         run: python publisher/check_ig_token.py
 
       - name: Publish due reels (one per day by default)
         env:
-          DRY_RUN: ${{ github.event.inputs.dry_run }}
+          MODE: ${{ steps.mode.outputs.mode }}
           LIMIT: ${{ github.event.inputs.limit }}
         run: |
           set -o pipefail
           mkdir -p logs
           ARGS=""
-          if [ "$DRY_RUN" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          if [ "$MODE" = "heads-up" ]; then ARGS="$ARGS --heads-up"; fi
+          if [ "$MODE" = "dry-run" ]; then ARGS="$ARGS --dry-run"; fi
           # On the daily cron no LIMIT is passed → the script's default of 1
           # applies = exactly one post per day. A manual run can override
           # (set the limit input to 0 for "all due", or to N for a custom cap).
@@ -132,19 +167,29 @@ jobs:
         if: failure()
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          MODE: ${{ steps.mode.outputs.mode }}
         run: |
           python - <<'PY'
           import os
           try:
               from publisher.notify_email import send
               url = os.getenv("RUN_URL", "")
-              send(
-                  "[GenZ ALERT] 3am MYT publish run FAILED",
-                  "The scheduled reel-publish run did not finish successfully.\n\n"
-                  "Your approved reels (rows marked 'Publish') were NOT posted\n"
-                  "and remain queued — they'll go out at the next 3am MYT run.\n\n"
-                  f"See what happened:\n{url}\n",
-              )
+              if os.getenv("MODE") == "heads-up":
+                  send(
+                      "[GenZ ALERT] 3pm MYT heads-up run FAILED (nothing was posted)",
+                      "The heads-up run that emails tonight's publish plan crashed,\n"
+                      "so you did NOT get the usual 'planned to publish' email.\n"
+                      "Tonight's 3am MYT publish will still try to run as normal.\n\n"
+                      f"See what happened:\n{url}\n",
+                  )
+              else:
+                  send(
+                      "[GenZ ALERT] 3am MYT publish run FAILED",
+                      "The scheduled reel-publish run did not finish successfully.\n\n"
+                      "Your approved reels (rows marked 'Publish') were NOT posted\n"
+                      "and remain queued — they'll go out at the next 3am MYT run.\n\n"
+                      f"See what happened:\n{url}\n",
+                  )
               print("Failure-alert email sent.")
           except Exception as exc:
               print(f"Could not send failure-alert email: {exc}")

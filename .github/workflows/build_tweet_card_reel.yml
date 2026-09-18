@@ -171,15 +171,32 @@ jobs:
           echo "$HOME/.deno/bin" >> "$GITHUB_PATH"
 
       - name: Install Python dependencies
+        # -U: yt-dlp must track YouTube's weekly changes — a 3-month-old
+        # yt-dlp (2026-09-11) got challenge pages / stubs on every client.
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install yt-dlp
+          pip install -U yt-dlp bgutil-ytdlp-pot-provider
+
+      - name: Install PO-token provider (bgutil server)
+        # YouTube demands a PO token for real video formats; without it every
+        # client 403s or returns a 217 KB stub (2026-09-11). The yt-dlp plugin
+        # (pip, above) talks to this Node server; publisher/pot_provider.py
+        # starts it on demand from this default location. See
+        # publisher/workflows/find_topic_media.md "PO token".
+        run: |
+          git clone -q --depth 1 --single-branch --branch 2.0.0 \
+            https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git "$HOME/bgutil-ytdlp-pot-provider"
+          cd "$HOME/bgutil-ytdlp-pot-provider/server"
+          npm ci --silent
+          npx tsc
+          test -f build/main.js && echo "PO-token provider built OK"
 
       - name: Verify tools
         run: |
           python --version
           ffmpeg -version | head -1
+          node --version
           deno --version | head -1 || echo "::warning::deno not found (yt-dlp JS solver may degrade)"
 
       - name: Write .env
@@ -356,9 +373,32 @@ jobs:
           $py = "$venv\Scripts\python.exe"
           & $py -m pip install --upgrade pip
           & $py -m pip install -r requirements.txt
-          & $py -m pip install yt-dlp
+          # -U: without it the venv kept yt-dlp 2026.6.9 for three months and
+          # YouTube's challenge/stub responses skipped a perfectly good row
+          # (2026-09-11). yt-dlp must be current on every run.
+          & $py -m pip install -U yt-dlp bgutil-ytdlp-pot-provider
           "python=$py" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           Write-Host "Using venv python: $py"
+
+      - name: Install PO-token provider (bgutil server, persistent)
+        # YouTube demands a PO token for real video formats; without it every
+        # client 403s or returns a 217 KB stub. The yt-dlp plugin (pip, above)
+        # talks to this Node server, which publisher/pot_provider.py starts on
+        # demand from C:\actions-runner\bgutil-pot\server (outside the repo so
+        # checkout-clean keeps it; built once, reused every run).
+        run: |
+          $potHome = "C:\actions-runner\bgutil-pot"
+          if (-not (Test-Path "$potHome\server\build\main.js")) {
+            Write-Host "Cloning + building bgutil PO-token provider ..."
+            if (Test-Path $potHome) { Remove-Item -Recurse -Force $potHome }
+            git clone -q --depth 1 --single-branch --branch 2.0.0 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git $potHome
+            Push-Location "$potHome\server"
+            npm ci --silent
+            npx tsc
+            Pop-Location
+          }
+          if (Test-Path "$potHome\server\build\main.js") { Write-Host "PO-token provider ready at $potHome\server" }
+          else { Write-Host "::warning::PO-token provider build missing — YouTube downloads may 403/stub" }
 
       - name: Write .env
         # OVERWRITE (not append): a self-hosted runner reuses the same working

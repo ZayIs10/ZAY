@@ -1,0 +1,100 @@
+name: Rescue Stuck Reels
+
+# Requeues reel rows stranded at Status="Building" when the render host died
+# mid-build — in practice, the laptop going to sleep with a render running.
+#
+# WHY THIS RUNS IN THE CLOUD (2026-09-18)
+# ---------------------------------------
+# Every other reel job runs on the self-hosted PC, because YouTube bot-blocks
+# GitHub's datacenter IPs and downloads need the home IP. This job is the one
+# exception: it NEVER downloads or renders anything, it only reads and writes
+# the Google Sheet. So it runs on ubuntu-latest and — crucially — keeps
+# working while the laptop is asleep, which is exactly when the rows it has to
+# rescue get stranded.
+#
+# THE FAILURE IT REPAIRS
+# ----------------------
+# When the laptop sleeps mid-build the runner dies instantly ("The self-hosted
+# runner lost communication with the server", no log). The Python that would
+# have written "Render Failed" was running ON that laptop, so the row keeps the
+# claim word "Building" forever. Nothing polls "Building" — not n8n, not
+# proxy_recovery, not the build — so the topic is silently dead until a human
+# notices. Five September runs died this way; nine more were cancelled after
+# waiting 24 h for a runner.
+#
+# Rows older than the grace window go back to "Ready to Run" (capped at 3
+# automatic attempts, then "Render Failed" so a genuinely broken row cannot
+# ping-pong through CI forever).
+
+on:
+  schedule:
+    # Every 4 hours. Cheap (a ~30 s sheet scan on free cloud minutes) and
+    # frequent enough that a row stranded overnight is queued again before
+    # the user next opens the laptop.
+    - cron: "15 */4 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report what would change, without writing to the sheet"
+        type: boolean
+        default: false
+      stale_minutes:
+        description: "Minutes at 'Building' before a row counts as stranded"
+        type: string
+        default: "60"
+
+# One sweep at a time. Two concurrent sweeps could both requeue the same row
+# and double-count its attempts.
+concurrency:
+  group: rescue-stuck-reels
+  cancel-in-progress: false
+
+jobs:
+  rescue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      GOOGLE_SHEET_REELS_NAME: Reels
+      GOOGLE_SHEET_MOTIVATION_NAME: Motivation
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # Only the Sheets stack is needed — no ffmpeg, no yt-dlp, no Pillow.
+      # Keeping this narrow is what makes the job ~30 s instead of ~3 min.
+      - name: Install Sheets dependencies
+        run: pip install gspread==6.1.2 google-auth python-dotenv
+
+      - name: Restore Google service account
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -z "$GOOGLE_SERVICE_ACCOUNT_JSON" ]; then
+            echo "::error::GOOGLE_SERVICE_ACCOUNT_JSON secret is missing — the sweep cannot read the sheet."
+            exit 1
+          fi
+          printf '%s' "$GOOGLE_SERVICE_ACCOUNT_JSON" > google_service_account.json
+
+      - name: Sweep stranded rows
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          if [ -n "${{ inputs.stale_minutes }}" ]; then
+            ARGS="$ARGS --stale-minutes ${{ inputs.stale_minutes }}"
+          fi
+          python publisher/stuck_row_recovery.py $ARGS
+
+      - name: Remove credentials
+        if: always()
+        run: rm -f google_service_account.json
